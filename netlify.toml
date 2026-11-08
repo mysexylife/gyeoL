@@ -1,0 +1,9 @@
+# Netlify 배포 설정: 빌드 없이 이 폴더를 그대로 공개한다.
+[build]
+  publish = "."
+
+# 진행자 화면은 검색에 노출되지 않게 한다.
+[[headers]]
+  for = "/admin.html"
+  [headers.values]
+    X-Robots-Tag = "noindex"
