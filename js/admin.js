@@ -7,7 +7,8 @@
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
   const S = { pin: "", data: null, error: "", confirm: "", busy: false, round: "", rounds: [], tab: "picks", open: {}, openPick: {}, pickEdit: {}, onlyBad: false,
-    add: { open: false, editing: false, round: "", newdate: "", name: "", gender: "", phone: "", number: "", age: "", school: "", mbti: "", hobby: "" } };
+    add: { open: false, editing: false, round: "", newdate: "", name: "", gender: "", phone: "", number: "", age: "", school: "", mbti: "", hobby: "" },
+    imp: { text: "", fileName: "", table: null, map: {}, date: "", round: "", newdate: "", numberedOnly: false, prune: false, done: null, error: "" } };
   try { S.pin = sessionStorage.getItem("rn_admin_pin") || ""; S.round = sessionStorage.getItem("rn_admin_round") || ""; S.tab = sessionStorage.getItem("rn_admin_tab") || "picks"; } catch (e) { /* 저장소 사용 불가 */ }
 
   let toastTimer;
@@ -121,6 +122,75 @@
     el.innerHTML = "";
     if (typeof QRCode === "undefined") { el.textContent = "QR"; return; }
     try { new QRCode(el, { text: entryUrl(), width: 148, height: 148, correctLevel: QRCode.CorrectLevel.M }); } catch (e) { el.textContent = "QR"; }
+  }
+
+  /* ───────── 명단 가져오기 (구글 시트 → 참가자) ───────── */
+  const colName = (i) => (i < 26 ? String.fromCharCode(65 + i) : "열" + (i + 1));
+  const shortHead = (h) => { h = String(h || "").replace(/\s+/g, " ").trim(); return h.length > 26 ? h.slice(0, 26) + "…" : h || "(제목 없음)"; };
+  const maskPhone = (p) => "***-****-" + String(p).slice(-4);
+
+  function importPanel(d) {
+    const im = S.imp, t = im.table;
+    let body = "";
+    if (t) {
+      const data = t.slice(1);
+      const dates = Roster.dateOptions(data, im.map);
+      if (dates.length && !dates.includes(im.date)) im.date = dates[0];
+      const b = Roster.build(data, im.map, { date: im.date, numberedOnly: im.numberedOnly });
+      im.built = b;
+      const sel = (f) => `<label class="mp"><span>${Roster.FIELD_LABEL[f]}</span><select data-field="${f}" id="map-${f}"><option value="-1" ${im.map[f] < 0 ? "selected" : ""}>(사용 안 함)</option>${t[0].map((h, i) => `<option value="${i}" ${im.map[f] === i ? "selected" : ""}>${colName(i)}열 · ${esc(shortHead(h))}</option>`).join("")}</select></label>`;
+      const missing = ["phone", "name", "gender"].filter((f) => im.map[f] < 0).map((f) => Roster.FIELD_LABEL[f].replace(" *", ""));
+      const errs = [];
+      if (missing.length) errs.push("필수 열을 골라 주세요: " + missing.join(", "));
+      if (b.dupNumbers.length) errs.push("같은 성별에 번호가 겹쳐요. 날짜(회차)를 고르거나 시트의 번호를 확인해 주세요. → " + b.dupNumbers.join(" / "));
+      const warns = [];
+      if (b.skipped.length) warns.push(`건너뛰는 행 ${b.skipped.length}개: ` + b.skipped.slice(0, 5).map((x) => `${x.line}행${x.name ? " " + x.name : ""}(${x.reason})`).join(", ") + (b.skipped.length > 5 ? " …" : ""));
+      if (b.dupPhones.length) warns.push("연락처가 같은 행이 있어 나중 행을 써요: " + b.dupPhones.join(", "));
+      if (b.invalidMbti) warns.push(`MBTI 형식이 아닌 값 ${b.invalidMbti}개는 비워 둬요.`);
+      const noNum = b.rows.filter((p) => p.number == null).length;
+      if (b.rows.length && noNum) warns.push(`현장 번호가 없는 ${noNum}명은 같은 성별의 다음 번호를 자동으로 붙여요.`);
+      const canRun = b.rows.length > 0 && !errs.length && !S.busy;
+      body = `<div class="mapgrid">${["phone", "name", "gender", "number", "age", "school", "mbti", "hobby", "date"].map(sel).join("")}</div>
+        <div class="filters">
+          ${dates.length
+            ? `<label class="mp"><span>가져올 날짜 (시트)</span><select id="imp-date">${dates.map((x) => `<option value="${x}" ${im.date === x ? "selected" : ""}>${esc(roundLabel(toRoundId(x)))}</option>`).join("")}</select></label>`
+            : `${importDateFields()}`}
+          <label class="ck"><input type="checkbox" id="imp-numbered" ${im.numberedOnly ? "checked" : ""}> 현장 번호가 있는 사람만</label>
+          <label class="ck"><input type="checkbox" id="imp-prune" ${im.prune ? "checked" : ""}> 이 회차에서 이번 명단에 없는 기존 참가자는 삭제</label>
+        </div>
+        <p class="sum"><b>${b.rows.length}명</b> 가져와요 <span class="sub">(남 ${b.counts.M} · 여 ${b.counts.F})</span></p>
+        ${errs.map((x) => `<p class="err">${esc(x)}</p>`).join("")}${warns.map((x) => `<p class="note">${esc(x)}</p>`).join("")}
+        ${b.rows.length ? `<div class="tbl-wrap"><table><thead><tr><th class="num">번호</th><th>성별</th><th>이름</th><th>나이</th><th>대학·학과</th><th>MBTI</th><th>취미</th><th>연락처</th></tr></thead><tbody>${b.rows.slice(0, 8).map((p) => `<tr><td class="num">${p.number ?? "자동"}</td><td>${p.gender === "M" ? "남" : "여"}</td><td>${esc(p.name)}</td><td>${esc(p.age_label)}</td><td>${esc(p.school)}</td><td>${esc(p.mbti)}</td><td>${esc(p.hobby)}</td><td>${maskPhone(p.phone)}</td></tr>`).join("")}</tbody></table></div>${b.rows.length > 8 ? `<p class="sub" style="font-size:12.5px">… 외 ${b.rows.length - 8}명</p>` : ""}` : ""}
+        <div class="toolbar"><span class="sub" style="font-size:12.5px">${im.fileName ? esc(im.fileName) : "붙여넣은 내용"} · 이상형·사진·입금·추가요청 열은 읽지 않고 서버로 보내지 않아요.</span>
+          <button class="btn" style="width:auto" data-act="imp-run" ${canRun ? "" : "disabled"}>${S.confirm === "imp" ? "삭제가 포함돼요. 한 번 더 눌러 실행" : `${b.rows.length}명 가져오기`}</button></div>`;
+    }
+    return `<section class="panel" id="imp-details"><h2>명단 가져오기 <span class="sub">구글 시트 응답 → 참가자</span></h2>
+      <p class="note">날짜마다 한 번씩 가져오세요(예: 2026-11-06, 2026-11-08). 가져온 사람은 그 날짜의 참가자가 되어, 직접 등록한 사람과 같은 날짜에 합쳐져요. 시트가 바뀌면 같은 방법으로 다시 가져오면 돼요. 같은 날짜에서 연락처가 같은 사람은 정보만 갱신하고, 메모·선택은 그대로 유지돼요. <b>시트를 먼저 가져오고 나머지를 직접 등록하면</b> 번호가 겹치지 않아요.</p>
+      <ol class="how"><li>구글 시트에서 <b>파일 → 다운로드 → 쉼표로 구분된 값(.csv)</b>을 받아 올리거나,</li><li>시트 전체를 선택(<b>Ctrl/⌘+A</b>)해 복사한 뒤 아래에 붙여넣으세요.</li></ol>
+      <div class="impin"><input type="file" id="imp-file" accept=".csv,.tsv,.txt,text/csv,text/plain" aria-label="CSV 파일 선택">
+        <textarea id="imp-text" placeholder="또는 여기에 붙여넣기" rows="3">${esc(im.text)}</textarea>
+        <button class="btn sm ghost" data-act="imp-parse">붙여넣은 내용 불러오기</button></div>
+      ${im.error ? `<p class="err">${esc(im.error)}</p>` : ""}
+      ${im.done ? `<div class="done">가져왔어요 · 추가 ${im.done.inserted}명, 갱신 ${im.done.updated}명${im.done.skipped ? `, 건너뜀 ${im.done.skipped}명` : ""}${im.done.pruned ? `, 삭제 ${im.done.pruned}명` : ""}</div>` : ""}
+      ${body}</section>`;
+  }
+  function loadImport(text, fileName) {
+    const im = S.imp;
+    im.error = ""; im.done = null; im.fileName = fileName || ""; im.confirm = false;
+    const table = Roster.parseTable(text);
+    if (table.length < 2) { im.table = null; im.error = "읽을 수 있는 행이 없어요. 머리글이 있는 시트 전체를 올려 주세요."; return; }
+    im.table = table; im.map = Roster.detect(table[0], table.slice(1)); im.date = ""; im.round = ""; im.newdate = ""; im.numberedOnly = false;
+    const need = ["phone", "name", "gender"].filter((f) => im.map[f] < 0);
+    if (need.length) im.error = "일부 열을 자동으로 찾지 못했어요. 아래에서 직접 골라 주세요.";
+  }
+
+  // 시트에 날짜 열이 없을 때: 참가자가 있는 날짜 중에서 고르거나 새 날짜를 만든다
+  const impRoundValue = () => S.imp.round || (knownRounds().some((r) => r.id === S.round) ? S.round : "__new");
+  function importDateFields() {
+    const im = S.imp, cur = impRoundValue(), t = todayISO();
+    const opts = knownRounds().map((r) => `<option value="${esc(r.id)}" ${r.id === cur ? "selected" : ""}>${esc(roundLabel(r.id))}${r.id === t ? " · 오늘" : ""} · ${r.count}명</option>`).join("");
+    return `<label class="mp" for="imp-round"><span>저장할 날짜</span><select id="imp-round">${opts}<option value="__new" ${cur === "__new" ? "selected" : ""}>＋ 새 날짜 추가…</option></select></label>`
+      + (cur === "__new" ? `<label class="mp" for="imp-newdate"><span>새 날짜</span><input type="date" id="imp-newdate" value="${esc(im.newdate || t)}"></label>` : "");
   }
 
   /* ───────── 회차 선택 + 참가자 목록(컴팩트) ───────── */
@@ -255,11 +325,11 @@
     const tab = rnd ? S.tab : "add", badCount = (d.picks || []).filter((x) => !x.target_id).length;
     const nav = `<nav class="tabs" aria-label="진행자 메뉴">${TABS.map(([id, label, icon]) => `<button data-act="tab" data-v="${id}" class="${tab === id ? "on" : ""}" ${tab === id ? 'aria-current="page"' : ""} ${!rnd && id !== "add" ? "disabled" : ""}><span class="ico">${icon}</span>${label}${id === "picks" && badCount ? `<em class="bdg" aria-label="확인 필요 ${badCount}건">${badCount}</em>` : ""}</button>`).join("")}</nav>`;
     let body;
-    if (!rnd) body = `<div class="empty"><b>아직 날짜(회차)가 없어요</b><p>날짜를 골라 참가자를 추가하거나 구글 시트를 가져오면 그 날짜 회차가 만들어져요.</p></div>${addPanel()}${entryPanel()}`;
+    if (!rnd) body = `<div class="empty"><b>아직 날짜(회차)가 없어요</b><p>날짜를 골라 참가자를 추가하거나 구글 시트를 가져오면 그 날짜 회차가 만들어져요.</p></div>${importPanel(d)}${addPanel()}${entryPanel()}`;
     else if (tab === "picks") body = tabPicks(d, rnd);
     else if (tab === "people") body = tabPeople(d, rnd);
     else if (tab === "survey") body = tabSurvey(d, rnd);
-    else body = `${addPanel()}${entryPanel()}`;
+    else body = `${importPanel(d)}${addPanel()}${entryPanel()}`;
     return `${head}${roundBar()}<main class="wrap wide admin-main">${body}</main>${nav}`;
   }
 
@@ -358,6 +428,21 @@
       try { await navigator.clipboard.writeText(entryUrl()); toast("링크를 복사했어요."); }
       catch (e) { toast("링크를 길게 눌러 복사해 주세요."); }
     },
+    "imp-parse": () => { S.imp.text = document.getElementById("imp-text").value; loadImport(S.imp.text, ""); render(); },
+    "imp-run": () => {
+      const im = S.imp, b = im.built;
+      if (!b || !b.rows.length) return;
+      if (im.prune && S.confirm !== "imp") return askConfirm("imp");
+      run(async () => {
+        const rows = b.rows.map((p) => ({ phone: p.phone, gender: p.gender, name: p.name, age_label: p.age_label, school: p.school, mbti: p.mbti, hobby: p.hobby, number: p.number }));
+        const data = im.table.slice(1);
+        const cur = impRoundValue(), rid = im.date ? toRoundId(im.date) : cur === "__new" ? String(im.newdate || todayISO()) : cur;
+        const label = roundLabel(rid);
+        im.done = await api.admin.import(S.pin, rid, label, rows, im.prune);
+        S.round = rid;
+        toast(label + " 명단을 가져왔어요.");
+      });
+    },
     "csv-match": () => {
       const rows = [["남 번호", "남 이름", "여 번호", "여 이름"]];
       S.data.matches.forEach((m) => rows.push([m.m_number, m.m_name, m.f_number, m.f_name]));
@@ -373,6 +458,17 @@
     const t = e.target;
     if (t.id === "round-select") { S.round = t.value; S.confirm = ""; S.openPick = {}; S.open = {}; S.pickEdit = {}; run(async () => {}); return; }
     if (t.id === "add-round") { S.add.round = t.value; render(); return; }
+    const im = S.imp;
+    if (t.id === "imp-file" && t.files && t.files[0]) {
+      const f = t.files[0];
+      f.text().then((txt) => { im.text = ""; loadImport(txt, f.name); render(); }).catch(() => { im.error = "파일을 읽지 못했어요."; render(); });
+      return;
+    }
+    if (t.dataset && t.dataset.field) { im.map[t.dataset.field] = Number(t.value); render(); return; }
+    if (t.id === "imp-date") { im.date = t.value; render(); return; }
+    if (t.id === "imp-round") { im.round = t.value; render(); return; }
+    if (t.id === "imp-numbered") { im.numberedOnly = t.checked; render(); return; }
+    if (t.id === "imp-prune") { im.prune = t.checked; S.confirm = ""; render(); return; }
     if (t.id === "only-bad") { S.onlyBad = t.checked; render(); }
     else if (t.dataset && t.dataset.pickFor) {
       const id = t.dataset.pickFor;
@@ -387,6 +483,8 @@
     }
   });
   document.addEventListener("input", (e) => {
+    if (e.target.id === "imp-text") S.imp.text = e.target.value;
+    if (e.target.id === "imp-newdate") S.imp.newdate = e.target.value;
     if (e.target.id && e.target.id.startsWith("add-") && e.target.id !== "add-details") {
       const k = e.target.id.slice(4);
       if (k === "phone") { e.target.value = e.target.value.replace(/\D/g, "").slice(0, 11); }   // '-' 를 입력하거나 붙여넣어도 숫자만 남긴다
