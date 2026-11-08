@@ -1,13 +1,13 @@
 /* 진행자 화면: 단계 전환, 참가 현황, 매칭, 설문 집계, CSV */
 (() => {
   const api = window.api;
-  const { SURVEY, MAX_PICKS, friendly, splitSchool, fmtPhone, normPhone, roundLabel, roundTag, toRoundId, dateChoices, todayISO } = window.RN;
+  const { SURVEY, MAX_PICKS, friendly, splitSchool, fmtPhone, normPhone, roundLabel, roundTag, toRoundId, todayISO } = window.RN;
   const Roster = window.Roster;   // 나이·MBTI 정리에만 쓴다 (명단 가져오기는 쓰지 않음)
   const $app = document.getElementById("app");
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
   const S = { pin: "", data: null, error: "", confirm: "", busy: false, round: "", rounds: [], tab: "picks", open: {}, openPick: {}, pickEdit: {}, onlyBad: false,
-    add: { open: false, editing: false, round: "", name: "", gender: "", phone: "", number: "", age: "", school: "", mbti: "", hobby: "" } };
+    add: { open: false, editing: false, round: "", newdate: "", name: "", gender: "", phone: "", number: "", age: "", school: "", mbti: "", hobby: "" } };
   try { S.pin = sessionStorage.getItem("rn_admin_pin") || ""; S.round = sessionStorage.getItem("rn_admin_round") || ""; S.tab = sessionStorage.getItem("rn_admin_tab") || "picks"; } catch (e) { /* 저장소 사용 불가 */ }
 
   let toastTimer;
@@ -21,7 +21,8 @@
   async function load() {
     S.rounds = (await api.admin.rounds(S.pin)).sort((a, b) => (a.id < b.id ? 1 : -1));   // 최근 날짜가 앞
     if (!S.rounds.some((r) => r.id === S.round)) {
-      const ids = S.rounds.map((r) => r.id).sort(), t = todayISO();
+      const withData = S.rounds.filter((r) => r.count > 0).map((r) => r.id).sort();
+      const ids = withData.length ? withData : S.rounds.map((r) => r.id).sort(), t = todayISO();
       S.round = ids.includes(t) ? t : ids.find((i) => i > t) || ids[ids.length - 1] || "";
     }
     S.data = S.round ? await api.admin.dashboard(S.pin, S.round) : { round: null, results_open: false, participants: [], matches: [], surveys: [] };
@@ -88,10 +89,15 @@
   }
 
   /* ───────── 날짜 드롭다운 (수동 등록·시트 가져오기 공통) ───────── */
-  function dateSelect(id, value, extra) {
-    const counts = Object.fromEntries(S.rounds.map((r) => [r.id, r.count])), t = todayISO();
-    const opts = dateChoices(S.rounds.map((r) => r.id)).map((d) => `<option value="${d}" ${d === value ? "selected" : ""}>${esc(roundLabel(d))}${d === t ? " · 오늘" : ""}${counts[d] != null ? " · " + counts[d] + "명" : ""}</option>`).join("");
-    return `<select id="${id}" ${extra || ""}>${opts}</select>`;
+  // 등록 폼의 날짜 선택값: 이미 참가자가 있는 날짜, 또는 '__new'(새 날짜 추가)
+  const knownRounds = () => S.rounds.filter((r) => r.count > 0 || r.id === S.round);
+  const addRoundValue = () => (S.add.editing ? S.round : S.add.round || (knownRounds().some((r) => r.id === S.round) ? S.round : "__new"));
+  function addDateFields() {
+    const a = S.add, cur = addRoundValue(), t = todayISO();
+    const opts = knownRounds().map((r) => `<option value="${esc(r.id)}" ${r.id === cur ? "selected" : ""}>${esc(roundLabel(r.id))}${r.id === t ? " · 오늘" : ""} · ${r.count}명</option>`).join("");
+    const sel = `<select id="add-round" ${a.editing ? "disabled" : ""}>${opts}<option value="__new" ${cur === "__new" ? "selected" : ""}>＋ 새 날짜 추가…</option></select>`;
+    const nd = cur === "__new" && !a.editing ? `<label class="mp" for="add-newdate"><span>새 날짜 * <small>달력에서 고르면 YYYY-MM-DD로 저장돼요</small></span><input type="date" id="add-newdate" value="${esc(a.newdate || t)}" required></label>` : "";
+    return `<label class="mp" for="add-round"><span>날짜 *</span>${sel}</label>${nd}`;
   }
 
   /* ───────── 참가자 입장 링크 + QR ───────── */
@@ -123,8 +129,9 @@
     if (!S.rounds.length) return "";
     const cur = S.rounds.find((r) => r.id === S.round);
     const tag = (r) => { const t = roundTag(r.id); return t === "지난" ? "" : " · " + t; };
+    const shown = S.rounds.filter((r) => r.count > 0 || r.id === S.round);   // 참가자 데이터가 있는 날짜만
     return `<div class="roundsel"><label for="round-select">날짜</label>
-      <select id="round-select" aria-label="날짜별 회차 선택">${S.rounds.map((r) => `<option value="${esc(r.id)}" ${r.id === S.round ? "selected" : ""}>${esc(roundLabel(r.id))}${tag(r)} · ${r.count}명 · ${r.results_open ? "결과 공개" : "진행 중"}</option>`).join("")}</select>
+      <select id="round-select" aria-label="날짜별 회차 선택">${shown.map((r) => `<option value="${esc(r.id)}" ${r.id === S.round ? "selected" : ""}>${esc(roundLabel(r.id))}${tag(r)} · ${r.count}명 · ${r.results_open ? "결과 공개" : "진행 중"}</option>`).join("")}</select>
       ${cur ? `<span class="rtag t-${roundTag(cur.id)}">${roundTag(cur.id)}</span>` : ""}</div>`;
   }
   // 한 줄: 번호 · 이름 · 성별 · 연락처 + 펼치기 버튼.  자세한 정보는 펼쳤을 때만 보인다.
@@ -148,7 +155,7 @@
   }
 
   /* ───────── 참가자 직접 추가·수정 ───────── */
-  const emptyAdd = () => ({ open: true, editing: false, round: "", name: "", gender: "", phone: "", number: "", age: "", school: "", mbti: "", hobby: "" });
+  const emptyAdd = () => ({ open: true, editing: false, round: "", newdate: "", name: "", gender: "", phone: "", number: "", age: "", school: "", mbti: "", hobby: "" });
   function addPanel() {
     const a = S.add, hasRound = !!(S.data && S.data.round);
     const f = (id, label, input) => `<label class="mp" for="add-${id}"><span>${label}</span>${input}</label>`;
@@ -156,7 +163,7 @@
     return `<section class="panel" id="add-details"><h2>${a.editing ? "참가자 정보 수정" : "참가자 직접 추가"} </h2>
       <p class="note">${a.editing ? "연락처는 그 사람을 구분하는 값이라 바꿀 수 없어요. 연락처를 바꾸려면 이전 사람을 삭제하고 새로 추가하세요." : "추가한 사람은 선택한 날짜의 참가자가 되어 바로 입장할 수 있어요. 연락처는 <b>하이픈 없이 숫자만</b> 저장돼요. 같은 연락처로 다시 추가하면 정보가 수정돼요. 번호를 비우면 같은 성별의 다음 번호가 붙어요."}</p>
       <form id="f-add" class="addgrid" autocomplete="off">
-        ${f("round", "날짜 *", dateSelect("add-round", a.editing ? S.round : (a.round || S.round || todayISO()), a.editing ? "disabled" : ""))}
+        ${addDateFields()}
         ${f("name", "이름 *", txt("name", "성+이름 (예: 김지은)", "required"))}
         <div class="mp"><span>성별 *</span><div class="seg"><label><input type="radio" name="add-gender" value="M" ${a.gender === "M" ? "checked" : ""}><span>남성</span></label><label><input type="radio" name="add-gender" value="F" ${a.gender === "F" ? "checked" : ""}><span>여성</span></label></div></div>
         ${f("phone", "연락처 * ('-' 없이 숫자만)", `<input type="tel" inputmode="numeric" id="add-phone" value="${esc(a.phone)}" placeholder="01012345678" autocomplete="off" required ${a.editing ? "readonly" : ""}>`)}
@@ -365,6 +372,7 @@
   document.addEventListener("change", (e) => {
     const t = e.target;
     if (t.id === "round-select") { S.round = t.value; S.confirm = ""; S.openPick = {}; S.open = {}; S.pickEdit = {}; run(async () => {}); return; }
+    if (t.id === "add-round") { S.add.round = t.value; render(); return; }
     if (t.id === "only-bad") { S.onlyBad = t.checked; render(); }
     else if (t.dataset && t.dataset.pickFor) {
       const id = t.dataset.pickFor;
@@ -393,8 +401,8 @@
     e.preventDefault();
     if (e.target.id === "f-add") {
       const a = S.add, phone = normPhone(a.phone), name = a.name.trim();
-      const rid = a.editing ? S.round : (a.round || S.round || todayISO());
-      if (!rid) return toast("날짜를 골라 주세요.");
+      const cur = addRoundValue(), rid = a.editing ? S.round : cur === "__new" ? String(a.newdate || todayISO()) : cur;
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(rid)) return toast("날짜를 골라 주세요.");
       if (!name) return toast("이름을 적어 주세요.");
       if (!a.gender) return toast("성별을 골라 주세요.");
       if (!/^01\d{8,9}$/.test(phone)) return toast("연락처를 정확히 입력해 주세요.");
