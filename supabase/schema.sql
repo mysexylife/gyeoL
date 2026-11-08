@@ -2,7 +2,7 @@
 --   · 회차별 운영, 연락처 로그인, 구글시트 명단
 --   · 최종 선택은 언제든 제출(번호/이름 입력), 매칭 결과 공개는 진행자가 회차별로 한 번에 연다
 -- Supabase 대시보드 > SQL Editor 에 통째로 붙여넣고 Run 하세요. (여러 번 실행해도 안전합니다)
--- 실행 전에 아래 'CHANGE-ME-1234' 진행자 비밀번호를 바꾸세요.
+-- 실행 전에 아래 '01000000000' 을 진행자 마스터키(숫자 8자리 이상, 예: 휴대폰 번호 형태)로 바꾸세요.
 --
 -- ※ v1(profiles / Supabase Auth) 을 실행했다면 먼저 아래 한 줄의 주석을 풀어 정리하세요.
 -- drop table if exists public.picks, public.notes, public.surveys, public.sessions, public.participants, public.profiles cascade;
@@ -24,10 +24,10 @@ drop function if exists public.admin_import(text, jsonb, boolean);
 
 create table if not exists public.app_settings (
   id        int primary key default 1 check (id = 1),
-  admin_pin text not null,
+  admin_pin text not null,                -- 진행자 마스터키 (숫자). 진행자 모두가 같은 키로 들어간다
   max_picks int  not null default 3
 );
-insert into public.app_settings (id, admin_pin) values (1, 'CHANGE-ME-1234')
+insert into public.app_settings (id, admin_pin) values (1, '01000000000')
 on conflict (id) do nothing;
 
 -- 회차: 매칭 결과를 열었는지(results_open)를 회차마다 따로 가진다.
@@ -297,13 +297,22 @@ end $$;
 
 -- ───────────────────────── 진행자용 함수 (비밀번호 필요) ─────────────────────────
 
+-- 마스터키 확인. 하이픈·공백은 무시하고 숫자만 비교한다. (010-1234-5678 = 01012345678)
+create or replace function public.check_master(p_key text)
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (
+    select 1 from public.app_settings
+    where id = 1
+      and length(regexp_replace(coalesce(p_key, ''), '\D', '', 'g')) >= 8
+      and regexp_replace(coalesce(p_key, ''), '\D', '', 'g') = regexp_replace(admin_pin, '\D', '', 'g'))
+$$;
+
 create or replace function public._check_admin(p_pin text)
 returns void language plpgsql security definer set search_path = public as $$
 begin
-  if p_pin is null or not exists (select 1 from public.app_settings where id = 1 and admin_pin = p_pin) then
-    raise exception 'bad_pin';
-  end if;
+  if not public.check_master(p_pin) then raise exception 'bad_pin'; end if;
 end $$;
+
 
 -- 회차 목록 (결과 공개 여부와 인원 포함)
 create or replace function public.admin_rounds(p_pin text)

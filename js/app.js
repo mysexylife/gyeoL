@@ -241,7 +241,7 @@
   function header() {
     const logo = S.me ? `<button class="brand" type="button" data-act="home" aria-label="홈 (내 프로필)">gyeoL</button>` : `<div class="brand">gyeoL</div>`;
     return `<header class="top">${logo}<div class="top-r">${S.me ? `<button class="link" data-act="logout">나가기</button>` : ""}</div></header>
-      ${api.mode === "demo" ? `<div class="demo-bar">체험 모드 · 이 브라우저에만 저장돼요. 가짜 참가자가 함께 있어요. <a href="admin.html?demo">진행자 화면 (PIN: demo)</a></div>` : ""}`;
+      ${api.mode === "demo" ? `<div class="demo-bar">체험 모드 · 이 브라우저에만 저장돼요. 가짜 참가자가 함께 있어요. <a href="admin.html?demo">진행자 화면 (마스터키 010-1234-5678)</a></div>` : ""}`;
   }
 
   function render() {
@@ -404,7 +404,17 @@
     guarded(async () => {
       const d = digits(raw);
       if (d.length < 10 || d.length > 13) throw new Error("bad_phone");
-      const r = await api.login(raw);
+      let r;
+      try { r = await api.login(raw); }
+      catch (e) {
+        // 명단에 없는 번호가 진행자 마스터키라면 진행자 화면으로 보낸다
+        if (String(e.message).includes("not_registered") && (await api.isMaster(raw))) {
+          try { sessionStorage.setItem("rn_admin_pin", d); } catch (err) { /* 저장소 사용 불가: 진행자 화면에서 다시 입력 */ }
+          location.href = "admin.html" + location.search;
+          return;
+        }
+        throw e;
+      }
       if (r.choices) { S.choices = { phone: raw, list: r.choices }; return; }
       await finishLogin(r);
     });

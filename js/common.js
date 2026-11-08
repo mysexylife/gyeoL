@@ -30,7 +30,7 @@
     result_published: "매칭 결과가 이미 공개되어 선택을 바꿀 수 없어요.",
     not_ready: "아직 매칭 결과가 공개되지 않았어요.",
     invalid_slot: "메모 칸 번호가 올바르지 않아요.",
-    bad_pin: "진행자 비밀번호가 맞지 않아요.",
+    bad_pin: "마스터키가 맞지 않아요.",
     round_required: "가져올 회차를 정해 주세요.",
     number_taken: "같은 성별에 이미 쓰고 있는 번호예요.",
     invalid_number: "번호는 1 이상의 숫자여야 해요.",
@@ -80,6 +80,7 @@
     const getTok = () => { try { return localStorage.getItem(KEY); } catch (e) { return null; } };
     const setTok = (t) => { try { if (t) localStorage.setItem(KEY, t); else localStorage.removeItem(KEY); } catch (e) { /* 저장소 사용 불가 */ } };
     const rpc = async (name, args) => {
+      if (args && args.p_pin !== undefined) args = Object.assign({}, args, { p_pin: digits(args.p_pin) });
       const { data, error } = await sb.rpc(name, args || {});
       if (error) throw new Error(error.message + (error.details ? " :: " + error.details : ""));
       return data;
@@ -99,6 +100,8 @@
         try { return await authed("get_me"); }
         catch (e) { if (String(e.message).includes("not_authenticated")) { setTok(null); return null; } throw e; }
       },
+      // 입력한 번호가 진행자 마스터키인지 (참가자 로그인 화면에서 진행자가 같은 칸에 입력한다)
+      isMaster: async (key) => !!(await rpc("check_master", { p_key: key })),
       async logout() { const t = getTok(); setTok(null); if (t) { try { await rpc("logout", { p_token: t }); } catch (e) { /* 무시 */ } } },
       getStatus: () => authed("get_status"),
       async getNotes() { return (await authed("get_notes")) || {}; },
@@ -121,7 +124,7 @@
   /* ───────────── 체험 모드 (localStorage, 가짜 명단 · 회차 2개) ───────────── */
   function demoApi() {
     const KEY = "rotation-note-demo-v3";
-    const ADMIN_PIN = "demo";
+    const ADMIN_PIN = "01012345678";   // 체험 모드 마스터키
     const NAMES = {
       F: ["김지은", "이수아", "박하린", "최민서", "정서윤", "강예린", "조다은", "윤채원", "장유나"],
       M: ["김도윤", "이시우", "박준호", "최민재", "정지훈", "강현우", "조태민", "윤서진", "장건우"],
@@ -153,7 +156,7 @@
     const me = (s) => s.people.find((x) => x.id === s.session) || fail("not_authenticated");
     const card = (p) => ({ id: p.id, number: p.number, gender: p.gender, name: p.name, age_label: p.age_label, school: p.school, mbti: p.mbti, hobby: p.hobby });
     const mine = (s, u) => Object.assign(card(u), { phone: u.phone, round_id: u.round, round_label: s.rounds[u.round].label });
-    const checkAdmin = (pin) => { if (pin !== ADMIN_PIN) fail("bad_pin"); };
+    const checkAdmin = (pin) => { if (digits(pin) !== ADMIN_PIN) fail("bad_pin"); };
 
     // 로그인하지 않은 명단 참가자는 체험용으로 자동 선택·설문을 만든다 (같은 회차 안에서만)
     function ensureSamples(s, round) {
@@ -190,6 +193,7 @@
         return { me: mine(s, u) };
       }),
       getMe: () => op((s) => { const u = s.people.find((x) => x.id === s.session); return u ? mine(s, u) : null; }),
+      isMaster: async (key) => digits(key) === ADMIN_PIN,
       logout: () => op((s) => { s.session = null; }),
       getStatus: () => op((s) => ({ results_open: !!s.rounds[me(s).round].results_open })),
       getNotes: () => op((s) => s.notes[me(s).id] || {}),

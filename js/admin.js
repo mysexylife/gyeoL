@@ -78,8 +78,8 @@
   /* ───────── 뷰 ───────── */
   function loginView() {
     return `<header class="top"><div class="brand">gyeoL <small>진행자</small></div><span class="pill">${api.mode === "demo" ? "체험 모드" : "관리"}</span></header>
-      <main class="wrap"><form id="f-pin" class="panel"><h2>진행자 비밀번호</h2>
-        <div class="field"><label for="pin">비밀번호</label><input id="pin" type="password" autocomplete="off" required placeholder="${api.mode === "demo" ? "체험 모드: demo" : ""}"></div>
+      <main class="wrap"><form id="f-pin" class="panel"><h2>진행자 마스터키</h2>
+        <div class="field"><label for="pin">마스터키 (진행자 공통)</label><input id="pin" type="tel" inputmode="tel" autocomplete="off" required placeholder="${api.mode === "demo" ? "체험 모드: 010-1234-5678" : "010-0000-0000"}"></div>
         ${S.error ? `<p class="err">${esc(S.error)}</p>` : ""}
         <button class="btn" type="submit">들어가기</button></form></main>`;
   }
@@ -329,12 +329,18 @@
       run(async () => { await api.admin.setNumber(S.pin, t.dataset.id, n); toast("번호를 " + n + "번으로 바꿨어요."); });
     }
   });
-  document.addEventListener("input", (e) => { if (e.target.id === "imp-text") S.imp.text = e.target.value; });
+  document.addEventListener("input", (e) => {
+    if (e.target.id === "imp-text") S.imp.text = e.target.value;
+    if (e.target.id === "pin") {   // 마스터키도 010-1234-5678 형태로 정리
+      const d = e.target.value.replace(/\D/g, "").slice(0, 11);
+      e.target.value = d.length <= 3 ? d : d.length <= 7 ? d.slice(0, 3) + "-" + d.slice(3) : d.slice(0, 3) + "-" + d.slice(3, 7) + "-" + d.slice(7);
+    }
+  });
   document.addEventListener("toggle", (e) => { if (e.target.id === "imp-details") S.imp.open = e.target.open; }, true);
   document.addEventListener("submit", async (e) => {
     e.preventDefault();
     if (e.target.id !== "f-pin") return;
-    S.pin = document.getElementById("pin").value;
+    S.pin = (document.getElementById("pin").value || "").replace(/\D/g, "");
     try {
       await load(); S.error = "";
       try { sessionStorage.setItem("rn_admin_pin", S.pin); } catch (err) { /* noop */ }
