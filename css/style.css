@@ -549,18 +549,19 @@ button.brand { background: none; border: 0; padding: 4px 0; cursor: pointer; -we
 .roundsel select { flex: 1; min-width: 0; border: 1px solid var(--accent); background: var(--surface); border-radius: 12px; padding: 10px 12px; font: 500 15px var(--sans); color: var(--ink); }
 .roundsel .rtag { flex: none; margin: 0; }
 
-/* 하단 탭: 오른쪽 아래에 뜨는 Netlify 로고와 겹치지 않도록 오른쪽을 비워 둔다 */
-.tabs { padding-right: max(84px, env(safe-area-inset-right, 0px)); }
 .stats.s3 { grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .stats.s3 .stat { padding: 10px 12px; }
 .stats.s3 .stat small { font-size: 11.5px; line-height: 1.3; }
 .stats.s3 .stat b { font-size: 24px; }
 .stats.s3 .stat b em { font-size: 12px; }
 
-/* 하단 탭: 화면 아래에 떠 있는 둥근 막대. 오른쪽은 Netlify 로고 자리로 비워 둔다. (자리 폭은 --badge-gap 로 조절) */
-:root { --badge-gap: 84px; }
-.tabs { left: max(12px, env(safe-area-inset-left, 0px)); right: var(--badge-gap); bottom: calc(12px + env(safe-area-inset-bottom, 0px));
-  border: 1px solid var(--line); border-radius: 24px; padding: 6px;
-  background: color-mix(in srgb, var(--surface) 94%, transparent); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); box-shadow: var(--shadow); }
-#toast { bottom: calc(100px + env(safe-area-inset-bottom, 0px)); }
-@media (min-width: 720px) { .tabs { left: 50%; right: auto; transform: translateX(-50%); width: min(560px, calc(100vw - 2 * var(--badge-gap))); } }
+
+/* 하단 탭: 글자가 위, 아이콘이 아래. 글자·아이콘을 키웠다. */
+.tabs { padding-top: 8px; }
+.tabs button { display: flex; flex-direction: column-reverse; align-items: center; justify-content: center; gap: 5px; padding: 6px 2px; font-size: 15px; letter-spacing: -.01em; line-height: 1.2; }
+.tabs .ico { width: 56px; height: 36px; }
+.tabs .ico svg { width: 29px; height: 29px; stroke-width: 1.5; }
+.tabs .bdg { top: 0; left: calc(50% + 14px); }
+.wrap { padding-bottom: 132px; }
+.admin-main { padding-bottom: 136px; }
+#toast { bottom: calc(112px + env(safe-area-inset-bottom, 0px)); }
