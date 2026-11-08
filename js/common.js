@@ -41,7 +41,7 @@
   function friendly(err) {
     const msg = (err && err.message) || String(err);
     const [head, detail] = msg.split(" :: ");
-    if (head.includes("not_found")) return "'" + detail + "'에 해당하는 번호나 이름을 찾지 못했어요.";
+    if (head.includes("not_found")) return "'" + detail + "'에 해당하는 번호나 이름을 찾지 못했어요. 이름은 성까지 정확히 적어 주세요.";
     if (head.includes("ambiguous_name")) return "'" + detail + "' 이름이 여러 명이에요. 번호로 적어 주세요.";
     if (head.includes("duplicate_pick")) return "'" + detail + "'은(는) 이미 적었어요.";
     for (const k in ERRORS) if (head.includes(k)) return ERRORS[k];
@@ -123,8 +123,8 @@
     const KEY = "rotation-note-demo-v3";
     const ADMIN_PIN = "demo";
     const NAMES = {
-      F: ["지은", "수아", "하린", "민서", "서윤", "예린", "다은", "채원", "유나"],
-      M: ["도윤", "시우", "준호", "민재", "지훈", "현우", "태민", "서진", "건우"],
+      F: ["김지은", "이수아", "박하린", "최민서", "정서윤", "강예린", "조다은", "윤채원", "장유나"],
+      M: ["김도윤", "이시우", "박준호", "최민재", "정지훈", "강현우", "조태민", "윤서진", "장건우"],
     };
     const SCHOOLS = ["고려대-건축학과", "연세대-경제학부", "한양대-전기공학과", "중앙대-국제물류학과", "서강대-경영학과", "성신여대-AI융합학부", "이화여대-간호학과", "홍익대-시각디자인과", "건국대-수의학과"];
     const AGES = ["01년생", "02년생", "03년생", "00년생", "04년생", "03년생", "02년생", "01년생", "04년생"];
