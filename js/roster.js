@@ -132,7 +132,11 @@
     let invalidMbti = 0;
     data.forEach((r, idx) => {
       const line = idx + 2; // 시트의 행 번호(머리글이 1행)
-      if (opts.date && map.date >= 0 && !dateTokens(cellOf(r, map.date)).includes(opts.date)) return;
+      if (opts.date && map.date >= 0) {
+        const tk = dateTokens(cellOf(r, map.date));
+        if (!tk.includes(opts.date)) return;
+        if (opts.onlyThisDate && tk.some((x) => x !== opts.date)) return; // 다른 날짜도 고른 사람 제외
+      }
       const numRaw = cellOf(r, map.number);
       const num = /^\d+$/.test(numRaw) ? parseInt(numRaw, 10) : null;
       if (opts.numberedOnly && num == null) return;

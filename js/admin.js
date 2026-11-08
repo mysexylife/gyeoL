@@ -8,7 +8,7 @@
 
   const S = { pin: "", data: null, error: "", confirm: "", busy: false, round: "", rounds: [], tab: "picks", open: {}, openPick: {}, pickEdit: {}, onlyBad: false,
     add: { open: false, editing: false, round: "", newdate: "", name: "", gender: "", phone: "", number: "", age: "", school: "", mbti: "", hobby: "" },
-    imp: { text: "", fileName: "", table: null, map: {}, date: "", round: "", newdate: "", numberedOnly: false, prune: false, done: null, error: "" } };
+    imp: { text: "", fileName: "", table: null, map: {}, date: "", round: "", newdate: "", numberedOnly: false, onlyDate: true, prune: false, done: null, error: "" } };
   try { S.pin = sessionStorage.getItem("rn_admin_pin") || ""; S.round = sessionStorage.getItem("rn_admin_round") || ""; S.tab = sessionStorage.getItem("rn_admin_tab") || "picks"; } catch (e) { /* 저장소 사용 불가 */ }
 
   let toastTimer;
@@ -136,7 +136,7 @@
       const data = t.slice(1);
       const dates = Roster.dateOptions(data, im.map);
       if (dates.length && !dates.includes(im.date)) im.date = dates[0];
-      const b = Roster.build(data, im.map, { date: im.date, numberedOnly: im.numberedOnly });
+      const b = Roster.build(data, im.map, { date: im.date, numberedOnly: im.numberedOnly, onlyThisDate: im.onlyDate });
       im.built = b;
       const sel = (f) => `<label class="mp"><span>${Roster.FIELD_LABEL[f]}</span><select data-field="${f}" id="map-${f}"><option value="-1" ${im.map[f] < 0 ? "selected" : ""}>(사용 안 함)</option>${t[0].map((h, i) => `<option value="${i}" ${im.map[f] === i ? "selected" : ""}>${colName(i)}열 · ${esc(shortHead(h))}</option>`).join("")}</select></label>`;
       const missing = ["phone", "name", "gender"].filter((f) => im.map[f] < 0).map((f) => Roster.FIELD_LABEL[f].replace(" *", ""));
@@ -155,6 +155,7 @@
           ${dates.length
             ? `<label class="mp"><span>가져올 날짜 (시트)</span><select id="imp-date">${dates.map((x) => `<option value="${x}" ${im.date === x ? "selected" : ""}>${esc(roundLabel(toRoundId(x)))}</option>`).join("")}</select></label>`
             : `${importDateFields()}`}
+          <label class="ck"><input type="checkbox" id="imp-onlydate" ${im.onlyDate ? "checked" : ""}> 이 날짜만 고른 사람만 (다른 날짜도 고른 사람 제외)</label>
           <label class="ck"><input type="checkbox" id="imp-numbered" ${im.numberedOnly ? "checked" : ""}> 현장 번호가 있는 사람만</label>
           <label class="ck"><input type="checkbox" id="imp-prune" ${im.prune ? "checked" : ""}> 이 회차에서 이번 명단에 없는 기존 참가자는 삭제</label>
         </div>
@@ -179,7 +180,7 @@
     im.error = ""; im.done = null; im.fileName = fileName || ""; im.confirm = false;
     const table = Roster.parseTable(text);
     if (table.length < 2) { im.table = null; im.error = "읽을 수 있는 행이 없어요. 머리글이 있는 시트 전체를 올려 주세요."; return; }
-    im.table = table; im.map = Roster.detect(table[0], table.slice(1)); im.date = ""; im.round = ""; im.newdate = ""; im.numberedOnly = false;
+    im.table = table; im.map = Roster.detect(table[0], table.slice(1)); im.date = ""; im.round = ""; im.newdate = ""; im.numberedOnly = false; im.onlyDate = true;
     const need = ["phone", "name", "gender"].filter((f) => im.map[f] < 0);
     if (need.length) im.error = "일부 열을 자동으로 찾지 못했어요. 아래에서 직접 골라 주세요.";
   }
@@ -467,6 +468,7 @@
     if (t.dataset && t.dataset.field) { im.map[t.dataset.field] = Number(t.value); render(); return; }
     if (t.id === "imp-date") { im.date = t.value; render(); return; }
     if (t.id === "imp-round") { im.round = t.value; render(); return; }
+    if (t.id === "imp-onlydate") { im.onlyDate = t.checked; render(); return; }
     if (t.id === "imp-numbered") { im.numberedOnly = t.checked; render(); return; }
     if (t.id === "imp-prune") { im.prune = t.checked; S.confirm = ""; render(); return; }
     if (t.id === "only-bad") { S.onlyBad = t.checked; render(); }
