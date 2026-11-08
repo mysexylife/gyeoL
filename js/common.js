@@ -51,18 +51,13 @@
   }
 
   /* ───────────── 회차(날짜) ─────────────
-   * 회차는 'YYYY-MM-DD' 로 저장하고, 화면에는 모두 '11/8 (일)' 형식으로 보여준다. (연도가 올해와 다르면 '2025.11.8 (토)')
+   * 회차는 'YYYY-MM-DD'(예: 2026-11-08) 한 가지 형식으로 저장하고, 화면에도 같은 형식으로 보여준다.
    * 연도를 id 에 넣는 이유: 해마다 같은 날짜(예: 11/8)가 겹쳐도 지난 회차의 데이터가 섞이지 않게 하려는 것. */
   const ISO_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
   const WEEKDAY = ["일", "월", "화", "수", "목", "금", "토"];
   const p2 = (n) => String(n).padStart(2, "0");
   const todayISO = (now) => { now = now || new Date(); return now.getFullYear() + "-" + p2(now.getMonth() + 1) + "-" + p2(now.getDate()); };
-  function roundLabel(id) {
-    const m = ISO_RE.exec(String(id || ""));
-    if (!m) return String(id || "");
-    const y = +m[1], mo = +m[2], d = +m[3], wd = WEEKDAY[new Date(y, mo - 1, d).getDay()];
-    return y === new Date().getFullYear() ? mo + "/" + d + " (" + wd + ")" : y + "." + mo + "." + d + " (" + wd + ")";
-  }
+  const roundLabel = (id) => String(id || "");   // 화면에도 저장된 그대로 '2026-11-08' 형식으로 보여준다
   // 시트의 '11/8' 같은 날짜를 회차 id 로 바꾼다. 올해 기준이고, 5개월 넘게 지난 날짜면 내년으로 본다.
   function toRoundId(token, now) {
     now = now || new Date();
@@ -268,8 +263,8 @@
         const seen = new Set(), entries = [];
         typed.forEach((x) => {
           let t = null;
-          if (/^\d{1,3}$/.test(x)) t = pool.find((p) => p.number === parseInt(x, 10)) || null;
-          else { const hits = pool.filter((p) => norm(p.name) === norm(x)); if (hits.length === 1) t = hits[0]; }
+          if (/^\d{1,3}\s*번?$/.test(x)) t = pool.find((p) => p.number === parseInt(x, 10)) || null;
+          else { const hits = pool.filter((p) => norm(p.name) === norm(x.replace(/\s*님$/, ""))); if (hits.length === 1) t = hits[0]; }
           if (t) { if (seen.has(t.id)) return; seen.add(t.id); }
           entries.push({ target: t ? t.id : null, input: x });
         });

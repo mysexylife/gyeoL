@@ -149,6 +149,18 @@ returns text language sql immutable as $$
   from (select regexp_replace(coalesce(t, ''), '\D', '', 'g') as d) s
 $$;
 
+-- 연락처는 숫자만 저장한다. 하이픈·공백이 섞여 저장된 옛 데이터를 정리한다. (같은 회차에 정리 결과가 겹치면 건너뜀)
+do $$
+declare r record; np text;
+begin
+  for r in select id, round_id, phone from public.participants where phone !~ '^\d+$' loop
+    np := public._norm_phone(r.phone);
+    if np <> '' and not exists (select 1 from public.participants where round_id = r.round_id and phone = np and id <> r.id) then
+      update public.participants set phone = np where id = r.id;
+    end if;
+  end loop;
+end $$;
+
 create or replace function public._me(p_token uuid)
 returns uuid language plpgsql security definer set search_path = public as $$
 declare pid uuid;
@@ -263,17 +275,17 @@ begin
   delete from public.picks where participant_id = me.id;
   foreach x in array typed loop
     t := null;
-    if x ~ '^\d{1,3}$' then
+    if x ~ '^\d{1,3}\s*번?$' then
       select id into t from public.participants
-       where round_id = me.round_id and gender <> me.gender and number = x::int;
+       where round_id = me.round_id and gender <> me.gender and number = regexp_replace(x, '\D', '', 'g')::int;
     else
       select count(*) into k from public.participants
        where round_id = me.round_id and gender <> me.gender
-         and lower(replace(name, ' ', '')) = lower(replace(x, ' ', ''));
+         and lower(replace(name, ' ', '')) = lower(replace(regexp_replace(x, '\s*님$', ''), ' ', ''));
       if k = 1 then
         select id into t from public.participants
          where round_id = me.round_id and gender <> me.gender
-           and lower(replace(name, ' ', '')) = lower(replace(x, ' ', ''));
+           and lower(replace(name, ' ', '')) = lower(replace(regexp_replace(x, '\s*님$', ''), ' ', ''));
       end if;
     end if;
     if t is not null then

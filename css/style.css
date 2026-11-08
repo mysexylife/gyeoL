@@ -538,3 +538,13 @@ button.brand { background: none; border: 0; padding: 4px 0; cursor: pointer; -we
 .rtag.t-예정 { background: var(--ok-soft); color: var(--ok); }
 .rtag.t-오늘 { background: var(--accent); color: var(--accent-ink); }
 .rchip { min-width: 124px; }
+.typed { list-style: none; margin: 0 0 6px; padding: 0; display: grid; gap: 4px; font-size: 13px; }
+.typed li { overflow-wrap: anywhere; }
+.typed .typed-h { font: 700 12px var(--sans); color: var(--muted); }
+.pk.bad { max-width: 100%; }
+
+/* 진행자: 날짜 드롭다운 */
+.roundsel { display: flex; align-items: center; gap: 10px; max-width: 1040px; margin: 0 auto; padding: 10px max(16px, env(safe-area-inset-left, 0px)); }
+.roundsel label { font-size: 13px; font-weight: 700; color: var(--muted); flex: none; }
+.roundsel select { flex: 1; min-width: 0; border: 1px solid var(--accent); background: var(--surface); border-radius: 12px; padding: 10px 12px; font: 500 15px var(--sans); color: var(--ink); }
+.roundsel .rtag { flex: none; margin: 0; }
