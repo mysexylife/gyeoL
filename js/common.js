@@ -360,7 +360,9 @@
               const ex = s.people.find((x) => x.round === round && x.phone === ph);
               if (ex) { Object.assign(ex, fields); if (num !== null) ex.number = num; upd++; }
               else {
-                const n = num !== null ? num : Math.max(0, ...s.people.filter((x) => x.round === round && x.gender === g).map((x) => x.number)) + 1;
+                const taken = new Set(s.people.filter((x) => x.round === round && x.gender === g).map((x) => x.number));
+                let n = num;
+                if (n === null) { n = 1; while (taken.has(n)) n++; }   // 비어 있는 가장 작은 번호, 없으면 맨 뒤
                 s.people.push(Object.assign({ id: "p" + s.seq++, round, phone: ph, number: n, sample: false, loggedIn: false }, fields)); ins++;
               }
             });

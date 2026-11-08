@@ -484,7 +484,7 @@ end $$;
 -- 명단 가져오기. 한 회차 안에서 연락처가 같으면 갱신, 없으면 추가한다. (시트가 바뀌면 다시 가져오면 된다)
 -- 회차(p_round)가 없으면 새로 만든다.
 -- p_rows: [{phone, gender('M'|'F'), name, age_label, school, mbti, hobby, number?}]
---   number 가 있으면 그 번호를 쓰고, 없으면 새 참가자에게 같은 성별의 다음 번호를 붙인다.
+--   number 가 있으면 그 번호를 쓰고, 없으면 같은 성별에서 비어 있는 가장 작은 번호(빈 번호가 없으면 맨 뒤 번호)를 붙인다.
 -- p_prune: true 면 이번 명단에 없는 사람(이 회차 안)을 삭제한다.
 create or replace function public.admin_import(p_pin text, p_round text, p_label text, p_rows jsonb, p_prune boolean default false)
 returns jsonb language plpgsql security definer set search_path = public as $$
@@ -525,8 +525,14 @@ begin
       else
         insert into public.participants (round_id, phone, gender, number, name, age_label, school, mbti, hobby)
         values (trim(p_round), ph, g,
-          coalesce(num, (select coalesce(max(number), 0) + 1 from public.participants
-                          where round_id = trim(p_round) and gender = g)),
+          -- 번호를 비우면: 같은 날짜·같은 성별에서 비어 있는 가장 작은 번호, 빈 번호가 없으면 맨 뒤 번호
+          coalesce(num, (
+            select min(gs) from generate_series(1, coalesce((
+              select max(p2.number) from public.participants p2
+               where p2.round_id = trim(p_round) and p2.gender = g), 0) + 1) gs
+             where not exists (
+              select 1 from public.participants p3
+               where p3.round_id = trim(p_round) and p3.gender = g and p3.number = gs))),
           nm, nullif(trim(r->>'age_label'), ''), nullif(trim(r->>'school'), ''),
           nullif(upper(trim(r->>'mbti')), ''), nullif(trim(r->>'hobby'), ''));
         ins := ins + 1;

@@ -161,13 +161,13 @@
     const f = (id, label, input) => `<label class="mp" for="add-${id}"><span>${label}</span>${input}</label>`;
     const txt = (id, ph, extra) => `<input type="text" id="add-${id}" value="${esc(a[id])}" placeholder="${esc(ph || "")}" autocomplete="off" ${extra || ""}>`;
     return `<section class="panel" id="add-details"><h2>${a.editing ? "참가자 정보 수정" : "참가자 직접 추가"} </h2>
-      <p class="note">${a.editing ? "연락처는 그 사람을 구분하는 값이라 바꿀 수 없어요. 연락처를 바꾸려면 이전 사람을 삭제하고 새로 추가하세요." : "추가한 사람은 선택한 날짜의 참가자가 되어 바로 입장할 수 있어요. 연락처는 <b>하이픈 없이 숫자만</b> 저장돼요. 같은 연락처로 다시 추가하면 정보가 수정돼요. 번호를 비우면 같은 성별의 다음 번호가 붙어요."}</p>
+      <p class="note">${a.editing ? "연락처는 그 사람을 구분하는 값이라 바꿀 수 없어요. 연락처를 바꾸려면 이전 사람을 삭제하고 새로 추가하세요." : "추가한 사람은 선택한 날짜의 참가자가 되어 바로 입장할 수 있어요. 연락처는 <b>하이픈 없이 숫자만</b> 저장돼요. 같은 연락처로 다시 추가하면 정보가 수정돼요. <b>번호는 비워 두면 알아서 정해져요.</b> 같은 성별에서 비어 있는 가장 작은 번호가 붙고, 빈 번호가 없으면 맨 뒤 번호가 붙어요."}</p>
       <form id="f-add" class="addgrid" autocomplete="off">
         ${addDateFields()}
         ${f("name", "이름 *", txt("name", "성+이름 (예: 김지은)", "required"))}
         <div class="mp"><span>성별 *</span><div class="seg"><label><input type="radio" name="add-gender" value="M" ${a.gender === "M" ? "checked" : ""}><span>남성</span></label><label><input type="radio" name="add-gender" value="F" ${a.gender === "F" ? "checked" : ""}><span>여성</span></label></div></div>
         ${f("phone", "연락처 * ('-' 없이 숫자만)", `<input type="tel" inputmode="numeric" id="add-phone" value="${esc(a.phone)}" placeholder="01012345678" autocomplete="off" required ${a.editing ? "readonly" : ""}>`)}
-        ${f("number", "번호", `<input type="number" min="1" inputmode="numeric" id="add-number" value="${esc(a.number)}" placeholder="비우면 자동">`)}
+        ${f("number", "번호", `<input type="number" min="1" inputmode="numeric" id="add-number" value="${esc(a.number)}" placeholder="비우면 자동 배정">`)}
         ${f("age", "나이", txt("age", "예: 03년생"))}
         ${f("school", "대학교-학과", txt("school", "예: 고려대-건축학과"))}
         ${f("mbti", "MBTI", txt("mbti", "예: INTP", 'maxlength="4"'))}
@@ -411,7 +411,10 @@
       run(async () => {
         const r = await api.admin.import(S.pin, rid, label, [row], false);
         S.round = rid;
-        toast(name + (r.inserted ? "님을 추가했어요." : "님 정보를 수정했어요."));
+        await load();   // 배정된 번호를 알려주기 위해
+        const me = S.data.participants.find((x) => x.phone === phone);
+        const tag = me ? ` (${me.gender === "M" ? "남성" : "여성"} ${me.number}번)` : "";
+        toast(name + (r.inserted ? "님을 추가했어요" : "님 정보를 수정했어요") + tag);
         S.add = emptyAdd();
       });
       return;
