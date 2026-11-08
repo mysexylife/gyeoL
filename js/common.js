@@ -27,6 +27,7 @@
     not_authenticated: "다시 입장해 주세요.",
     not_registered: "명단에 없는 번호예요. 신청서에 적은 연락처가 맞는지 확인해 주세요.",
     too_many: "최대 " + MAX_PICKS + "명까지 적을 수 있어요.",
+    invalid_target: "선택할 수 없는 상대가 포함되어 있어요.",
     result_published: "매칭 결과가 이미 공개되어 선택을 바꿀 수 없어요.",
     not_ready: "아직 매칭 결과가 공개되지 않았어요.",
     invalid_slot: "메모 칸 번호가 올바르지 않아요.",
@@ -114,6 +115,7 @@
         dashboard: (pin, round) => rpc("admin_dashboard", { p_pin: pin, p_round: round }),
         setResults: (pin, round, open) => rpc("admin_set_results", { p_pin: pin, p_round: round, p_open: !!open }),
         setNumber: (pin, id, n) => rpc("admin_set_number", { p_pin: pin, p_id: id, p_number: n }),
+        setPicks: (pin, participantId, targetIds) => rpc("admin_set_picks", { p_pin: pin, p_participant: participantId, p_targets: targetIds }),
         remove: (pin, id) => rpc("admin_remove", { p_pin: pin, p_id: id }),
         reset: (pin, round) => rpc("admin_reset", { p_pin: pin, p_round: round }),
         import: (pin, round, label, rows, prune) => rpc("admin_import", { p_pin: pin, p_round: round, p_label: label, p_rows: rows, p_prune: !!prune }),
@@ -156,20 +158,25 @@
     const me = (s) => s.people.find((x) => x.id === s.session) || fail("not_authenticated");
     const card = (p) => ({ id: p.id, number: p.number, gender: p.gender, name: p.name, age_label: p.age_label, school: p.school, mbti: p.mbti, hobby: p.hobby });
     const mine = (s, u) => Object.assign(card(u), { phone: u.phone, round_id: u.round, round_label: s.rounds[u.round].label });
+    // 한 사람의 선택을 화면용으로 (찾은 상대는 번호·이름, 못 찾은 입력은 글자 그대로)
+    const pickView = (s, pid) => (s.picks[pid] || []).map((e, i) => {
+      const t = e.target ? s.people.find((x) => x.id === e.target) : null;
+      return { rank: i + 1, input: e.input, resolved: !!t, number: t ? t.number : null, name: t ? t.name : null };
+    });
     const checkAdmin = (pin) => { if (digits(pin) !== ADMIN_PIN) fail("bad_pin"); };
 
     // 로그인하지 않은 명단 참가자는 체험용으로 자동 선택·설문을 만든다 (같은 회차 안에서만)
     function ensureSamples(s, round) {
       const here = s.people.filter((x) => x.round === round);
-      const real = here.filter((x) => x.loggedIn);
-      here.filter((u) => !u.loggedIn && !s.picks[u.id]).forEach((u) => {
+      const real = here.filter((x) => x.loggedIn || !x.sample);   // 가짜 샘플이 아닌 사람 = 실제 참가자
+      here.filter((u) => u.sample && !u.loggedIn && !s.picks[u.id]).forEach((u) => {
         const r = rng(u.number * 7 + (u.gender === "M" ? 1 : 2));
         const pick = (arr) => arr[Math.floor(r() * arr.length)];
         const chosen = [];
         if (u.number % 3 === 1) real.filter((x) => x.gender !== u.gender).slice(0, 1).forEach((x) => chosen.push(x.id));
-        const pool = here.filter((x) => !x.loggedIn && x.gender !== u.gender).map((x) => x.id);
+        const pool = here.filter((x) => x.sample && !x.loggedIn && x.gender !== u.gender).map((x) => x.id);
         while (chosen.length < MAX_PICKS && pool.length) chosen.push(pool.splice(Math.floor(r() * pool.length), 1)[0]);
-        s.picks[u.id] = chosen;
+        s.picks[u.id] = chosen.map((id) => ({ target: id, input: "" }));
         const a = {};
         SURVEY.forEach((q) => {
           if (q.type === "scale") a[q.id] = 3 + Math.floor(r() * 3);
@@ -204,38 +211,36 @@
       }),
       getMyPicks: () => op((s) => {
         const u = me(s);
-        const picks = (s.picks[u.id] || []).map((id) => s.people.find((x) => x.id === id)).filter(Boolean).map((t) => ({ number: t.number, name: t.name }));
-        return { picks, submitted: !!s.surveys[u.id], answers: s.surveys[u.id] || {} };
+        return { picks: pickView(s, u.id), submitted: !!s.surveys[u.id], answers: s.surveys[u.id] || {} };
       }),
-      // 번호 또는 이름을 같은 회차의 이성 참가자로 찾는다
+      // 번호·이름이 정확히 맞으면 연결하고, 아니면 적은 글자 그대로 저장한다 (진행자가 나중에 맞춘다)
       submitPicks: (inputs, survey) => op((s) => {
         const u = me(s);
         if (s.rounds[u.round].results_open) fail("result_published");
         const pool = s.people.filter((x) => x.round === u.round && x.gender !== u.gender);
-        const ids = [];
-        (inputs || []).forEach((raw) => {
-          const x = String(raw || "").trim();
-          if (!x) return;
-          let hits;
-          if (/^\d{1,3}$/.test(x)) hits = pool.filter((p) => p.number === parseInt(x, 10));
-          else { const norm = (v) => String(v).replace(/\s+/g, "").toLowerCase(); hits = pool.filter((p) => norm(p.name) === norm(x)); if (hits.length > 1) fail("ambiguous_name", x); }
-          if (!hits.length) fail("not_found", x);
-          if (ids.includes(hits[0].id)) fail("duplicate_pick", x);
-          ids.push(hits[0].id);
+        const typed = (inputs || []).map((x) => String(x || "").trim().slice(0, 40)).filter(Boolean);
+        if (typed.length > MAX_PICKS) fail("too_many");
+        const norm = (v) => String(v).replace(/\s+/g, "").toLowerCase();
+        const seen = new Set(), entries = [];
+        typed.forEach((x) => {
+          let t = null;
+          if (/^\d{1,3}$/.test(x)) t = pool.find((p) => p.number === parseInt(x, 10)) || null;
+          else { const hits = pool.filter((p) => norm(p.name) === norm(x)); if (hits.length === 1) t = hits[0]; }
+          if (t) { if (seen.has(t.id)) return; seen.add(t.id); }
+          entries.push({ target: t ? t.id : null, input: x });
         });
-        if (ids.length > MAX_PICKS) fail("too_many");
-        s.picks[u.id] = ids;
+        s.picks[u.id] = entries;
         s.surveys[u.id] = survey || {};
-        return { picks: ids.map((id) => { const t = s.people.find((p) => p.id === id); return { number: t.number, name: t.name }; }) };
+        return { picks: pickView(s, u.id) };
       }),
       getResult: () => op((s) => {
         const u = me(s);
         if (!s.rounds[u.round].results_open) fail("not_ready");
         ensureSamples(s, u.round);
-        return (s.picks[u.id] || []).map((tid, i) => {
-          const t = s.people.find((x) => x.id === tid);
-          const mutual = (s.picks[tid] || []).includes(u.id);
-          return { rank: i + 1, number: t.number, name: t.name, age_label: t.age_label, school: t.school, mutual, phone: mutual ? t.phone : null };
+        return (s.picks[u.id] || []).map((e, i) => {
+          const t = e.target ? s.people.find((x) => x.id === e.target) : null;
+          const mutual = !!t && (s.picks[t.id] || []).some((p) => p.target === u.id);
+          return { rank: i + 1, resolved: !!t, input: e.input, number: t ? t.number : null, name: t ? t.name : null, age_label: t ? t.age_label : null, school: t ? t.school : null, mutual, phone: mutual ? t.phone : null };
         });
       }),
       admin: {
@@ -249,15 +254,21 @@
           if (r) ensureSamples(s, round);   // 체험 모드: 로그인하지 않은 가짜 참가자는 선택·설문을 자동으로 낸다
           const here = s.people.filter((p) => p.round === round);
           const matches = [];
-          here.filter((p) => p.gender === "M").forEach((m) => (s.picks[m.id] || []).forEach((tid) => {
-            if ((s.picks[tid] || []).includes(m.id)) { const f = s.people.find((x) => x.id === tid); matches.push({ m_number: m.number, m_name: m.name, f_number: f.number, f_name: f.name }); }
+          here.filter((p) => p.gender === "M").forEach((m) => (s.picks[m.id] || []).forEach((e) => {
+            const tid = e.target;
+            if (tid && (s.picks[tid] || []).some((p) => p.target === m.id)) { const f = s.people.find((x) => x.id === tid); matches.push({ m_number: m.number, m_name: m.name, f_number: f.number, f_name: f.name }); }
+          }));
+          const picks = [];
+          here.forEach((p) => (s.picks[p.id] || []).forEach((e, i) => {
+            const t = e.target ? s.people.find((x) => x.id === e.target) : null;
+            picks.push({ participant_id: p.id, rank: i + 1, target_id: e.target || null, input: e.input, target_number: t ? t.number : null, target_name: t ? t.name : null });
           }));
           return {
             round: r ? { id: round, label: r.label, results_open: !!r.results_open } : null,
             results_open: r ? !!r.results_open : false,
             participants: here.map((p) => ({ id: p.id, number: p.number, gender: p.gender, name: p.name, phone: p.phone, age_label: p.age_label, school: p.school, mbti: p.mbti, hobby: p.hobby, submitted: !!s.surveys[p.id] }))
               .sort((a, b) => (a.gender === b.gender ? a.number - b.number : a.gender === "M" ? -1 : 1)),
-            matches,
+            matches, picks,
             surveys: here.filter((p) => s.surveys[p.id]).map((p) => ({ gender: p.gender, answers: s.surveys[p.id] })),
           };
         }),
@@ -268,6 +279,14 @@
           if (!p || !(n >= 1)) fail("invalid_number");
           if (s.people.some((x) => x.id !== id && x.round === p.round && x.gender === p.gender && x.number === n)) fail("number_taken");
           p.number = n;
+        }),
+        setPicks: (pin, pid, targets) => op((s) => {
+          checkAdmin(pin);
+          const me2 = s.people.find((x) => x.id === pid);
+          if (!me2) fail("not_registered");
+          if (targets.length > MAX_PICKS) fail("too_many");
+          if (new Set(targets).size !== targets.length || targets.some((id) => { const t = s.people.find((x) => x.id === id); return !t || t.round !== me2.round || t.gender === me2.gender; })) fail("invalid_target");
+          s.picks[pid] = targets.map((id) => ({ target: id, input: "" }));
         }),
         remove: (pin, id) => op((s) => {
           checkAdmin(pin);

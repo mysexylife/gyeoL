@@ -1,12 +1,13 @@
 /* 진행자 화면: 단계 전환, 참가 현황, 매칭, 설문 집계, CSV */
 (() => {
   const api = window.api;
-  const { SURVEY, friendly, splitSchool, fmtPhone } = window.RN;
+  const { SURVEY, MAX_PICKS, friendly, splitSchool, fmtPhone, normPhone } = window.RN;
   const Roster = window.Roster;
   const $app = document.getElementById("app");
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
-  const S = { pin: "", data: null, error: "", confirm: "", busy: false, round: "", rounds: [], open: {},
+  const S = { pin: "", data: null, error: "", confirm: "", busy: false, round: "", rounds: [], open: {}, openPick: {}, pickEdit: {}, onlyBad: false,
+    add: { open: false, editing: false, round: "", name: "", gender: "", phone: "", number: "", age: "", school: "", mbti: "", hobby: "" },
     imp: { open: true, text: "", fileName: "", table: null, map: {}, date: "", numberedOnly: false, prune: false, done: null, error: "" } };
   try { S.pin = sessionStorage.getItem("rn_admin_pin") || ""; S.round = sessionStorage.getItem("rn_admin_round") || ""; } catch (e) { /* 저장소 사용 불가 */ }
 
@@ -187,9 +188,58 @@
             <button class="ptog" data-act="toggle" data-id="${p.id}" aria-expanded="${open}" aria-label="${esc(p.name)} 자세히 ${open ? "접기" : "보기"}">${chev}</button></div>
           ${open ? `<dl class="pdet">${rows}<div><dt>설문</dt><dd><span class="tag ${p.submitted ? "y" : "n"}">${p.submitted ? "제출" : "대기"}</span></dd></div>
             <div class="pact"><label>번호 <input class="numin" type="number" min="1" inputmode="numeric" data-id="${p.id}" data-old="${p.number}" value="${p.number}" aria-label="${esc(p.name)} 번호"></label>
-              <button class="link" data-act="remove" data-id="${p.id}" data-name="${esc(p.name)}">${S.confirm === "rm" + p.id ? "정말 삭제" : "삭제"}</button></div></dl>` : ""}
+              <span class="pbtns"><button class="link" data-act="edit-person" data-id="${p.id}">정보 수정</button><button class="link" data-act="remove" data-id="${p.id}" data-name="${esc(p.name)}">${S.confirm === "rm" + p.id ? "정말 삭제" : "삭제"}</button></span></div></dl>` : ""}
         </div>`;
       }).join("")}</div>`;
+  }
+
+  /* ───────── 참가자 직접 추가·수정 ───────── */
+  const emptyAdd = () => ({ open: true, editing: false, round: "", name: "", gender: "", phone: "", number: "", age: "", school: "", mbti: "", hobby: "" });
+  function addPanel() {
+    const a = S.add, hasRound = !!(S.data && S.data.round);
+    const f = (id, label, input) => `<label class="mp" for="add-${id}"><span>${label}</span>${input}</label>`;
+    const txt = (id, ph, extra) => `<input type="text" id="add-${id}" value="${esc(a[id])}" placeholder="${esc(ph || "")}" autocomplete="off" ${extra || ""}>`;
+    return `<details class="panel" id="add-details" ${a.open ? "open" : ""}><summary><h2>참가자 추가·수정 <span class="sub">시트에 없는 사람을 직접 넣기</span></h2></summary>
+      <p class="note">${a.editing ? "연락처는 그 사람을 구분하는 값이라 바꿀 수 없어요. 연락처를 바꾸려면 이전 사람을 삭제하고 새로 추가하세요." : "추가한 사람은 바로 입장할 수 있어요. 같은 연락처로 다시 추가하면 그 사람의 정보가 수정돼요. 번호를 비우면 같은 성별의 다음 번호가 붙어요."}</p>
+      <form id="f-add" class="addgrid" autocomplete="off">
+        ${hasRound ? "" : f("round", "회차 *", txt("round", "예: 11/8", "required"))}
+        ${f("name", "이름 *", txt("name", "성+이름 (예: 김지은)", "required"))}
+        <div class="mp"><span>성별 *</span><div class="seg"><label><input type="radio" name="add-gender" value="M" ${a.gender === "M" ? "checked" : ""}><span>남성</span></label><label><input type="radio" name="add-gender" value="F" ${a.gender === "F" ? "checked" : ""}><span>여성</span></label></div></div>
+        ${f("phone", "연락처 *", `<input type="tel" inputmode="tel" id="add-phone" value="${esc(a.phone)}" placeholder="010-1234-5678" required ${a.editing ? "readonly" : ""}>`)}
+        ${f("number", "번호", `<input type="number" min="1" inputmode="numeric" id="add-number" value="${esc(a.number)}" placeholder="비우면 자동">`)}
+        ${f("age", "나이", txt("age", "예: 03년생"))}
+        ${f("school", "대학교-학과", txt("school", "예: 고려대-건축학과"))}
+        ${f("mbti", "MBTI", txt("mbti", "예: INTP", 'maxlength="4"'))}
+        ${f("hobby", "취미", txt("hobby", "예: 러닝, 전시회"))}
+        <div class="addact"><button class="btn" type="submit" ${S.busy ? "disabled" : ""}>${a.editing ? "수정 저장" : "참가자 추가"}</button>${a.editing ? `<button class="btn ghost" type="button" data-act="add-cancel">취소</button>` : ""}</div>
+      </form></details>`;
+  }
+
+  /* ───────── 최종 선택 현황 + 수동 조정 ───────── */
+  function pickLabel(x) { return x.target_id ? `${x.target_number}번 ${x.target_name}` : `"${x.input}" (미확인)`; }
+  function picksPanel(d) {
+    const ppl = d.participants, picks = d.picks || [];
+    const of = (id) => picks.filter((x) => x.participant_id === id).sort((a, b) => a.rank - b.rank);
+    const mutual = (pid, tid) => !!tid && picks.some((x) => x.participant_id === tid && x.target_id === pid);
+    const bad = picks.filter((x) => !x.target_id).length;
+    const chev = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>`;
+    const rows = ppl.filter((p) => !S.onlyBad || of(p.id).some((x) => !x.target_id)).map((p) => {
+      const mine = of(p.id), open = !!S.openPick[p.id];
+      const sum = mine.length ? mine.map((x) => (x.target_id ? `<span class="pk ${mutual(p.id, x.target_id) ? "mu" : ""}">${x.target_number}</span>` : `<span class="pk bad">?</span>`)).join("") : `<span class="sub">-</span>`;
+      const cur = S.pickEdit[p.id] || Array.from({ length: MAX_PICKS }, (_, i) => (mine[i] && mine[i].target_id) || "");
+      const opp = ppl.filter((q) => q.gender !== p.gender).sort((a, b) => a.number - b.number);
+      const typed = mine.filter((x) => !x.target_id).map((x) => `"${x.input}"`);
+      const detail = open ? `<div class="pdet pickedit">
+          ${typed.length ? `<p class="warnnote">참가자가 적은 내용 중 못 찾은 것: <b>${esc(typed.join(", "))}</b></p>` : ""}
+          ${Array.from({ length: MAX_PICKS }, (_, i) => `<label class="pks"><span>${i + 1}순위</span><select data-pick-for="${p.id}" data-slot="${i}"><option value="">(비움)</option>${opp.map((q) => `<option value="${q.id}" ${cur[i] === q.id ? "selected" : ""}>${q.number}번 ${esc(q.name)}</option>`).join("")}</select></label>`).join("")}
+          <div class="pact"><span class="sub" style="font-size:12px">${p.submitted ? "설문 제출함" : "설문 미제출 (선택만 조정해도 돼요)"}</span><button class="btn sm" type="button" data-act="pick-save" data-id="${p.id}">저장</button></div></div>` : "";
+      return `<div class="prow ${open ? "open" : ""}" role="listitem"><div class="pmain pickmain"><span class="pn">${p.number}</span><span class="pnm">${esc(p.name)}</span><span class="pg g-${p.gender}">${p.gender === "M" ? "남" : "여"}</span><span class="psum">${sum}</span>
+        <button class="ptog" data-act="pick-toggle" data-id="${p.id}" aria-expanded="${open}" aria-label="${esc(p.name)} 선택 조정 ${open ? "접기" : "열기"}">${chev}</button></div>${detail}</div>`;
+    }).join("");
+    return `<section style="display:grid;gap:10px"><div class="toolbar"><div class="sec-title"><h2>최종 선택 현황</h2><span>제출 ${ppl.filter((p) => p.submitted).length} / ${ppl.length}명 · <b class="${bad ? "badtxt" : ""}">확인 필요 ${bad}건</b></span></div>
+        <div><label class="ck"><input type="checkbox" id="only-bad" ${S.onlyBad ? "checked" : ""}> 확인 필요만</label> <button class="btn sm ghost" data-act="csv-picks">선택 CSV</button></div></div>
+      <p class="note">참가자가 적은 최종 선택이에요. 숫자는 고른 상대의 번호이고, <span class="pk mu">붉은 숫자</span>는 서로 선택한 경우, <span class="pk bad">?</span>는 명단에서 정확히 찾지 못한 입력이에요. 줄을 펼치면 <b>직접 맞추거나 바꿀 수 있어요</b> (제출하지 않은 사람도 가능). 결과를 공개하기 전에 <b>확인 필요</b>를 정리하세요.</p>
+      ${rows ? `<div class="plist" role="list"><div class="phead pickhead"><span class="pn">번호</span><span>이름</span><span>성별</span><span>1·2·3순위</span><span></span></div>${rows}</div>` : `<div class="empty"><b>${S.onlyBad ? "확인이 필요한 선택이 없어요" : "아직 참가자가 없어요"}</b></div>`}</section>`;
   }
 
   function dashView() {
@@ -203,18 +253,19 @@
     if (!rnd) {
       return `${head}<main class="wrap wide">
         <div class="empty"><b>아직 회차가 없어요</b><p>아래 '명단 가져오기'에서 구글 시트를 불러오면 회차가 만들어져요.</p></div>
-        ${importPanel(d)}${entryPanel()}</main>`;
+        ${addPanel()}${importPanel(d)}${entryPanel()}</main>`;
     }
     return `${head}${roundBar()}
       <main class="wrap wide">
         <section class="panel"><div class="toolbar"><h2>${esc(rnd.label)} 매칭 결과</h2><button class="btn sm ghost" data-act="refresh">새로고침</button></div>
           <p class="note">참가자는 <b>언제든</b> 최종 선택과 설문을 제출·수정할 수 있어요. 아래 버튼을 누르면 이 회차의 <b>매칭 결과(서로 선택한 경우 연락처 포함)가 참가자 화면에 공개</b>되고, 그 뒤에는 선택을 더 바꿀 수 없어요. 공개 전에 '제출' 인원을 확인하세요. 회차마다 따로 공개해요.</p>
-          <div class="resultbar"><span class="tag ${d.results_open ? "y" : "n"}">${d.results_open ? "결과 공개 중" : "아직 비공개"}</span><span class="sub" style="font-size:13px">제출 ${submitted} / ${ppl.length}명 · 매칭 ${d.matches.length}쌍</span>
+          <div class="resultbar"><span class="tag ${d.results_open ? "y" : "n"}">${d.results_open ? "결과 공개 중" : "아직 비공개"}</span><span class="sub" style="font-size:13px">제출 ${submitted} / ${ppl.length}명 · 매칭 ${d.matches.length}쌍${(d.picks || []).some((x) => !x.target_id) ? ` · <b class="badtxt">확인 필요 ${(d.picks || []).filter((x) => !x.target_id).length}건</b>` : ""}</span>
             <button class="btn ${d.results_open ? "ghost" : ""}" style="width:auto" data-act="results" ${S.busy ? "disabled" : ""}>${d.results_open ? (S.confirm === "res-off" ? "한 번 더 눌러 공개 취소" : "공개 취소 (다시 제출 받기)") : S.confirm === "res-on" ? "한 번 더 눌러 공개" : "매칭 결과 공개하기"}</button></div></section>
         <section class="stats">
           <div class="stat"><small>명단</small><b>${ppl.length}<em>명 (남 ${men.length} · 여 ${women.length})</em></b></div>
           <div class="stat"><small>최종 선택·설문 제출</small><b>${submitted}<em>/ ${ppl.length}명</em></b></div>
           <div class="stat"><small>서로 선택(매칭)</small><b>${d.matches.length}<em>쌍</em></b></div>
+          <div class="stat"><small>확인 필요한 선택</small><b class="${(d.picks || []).some((x) => !x.target_id) ? "badtxt" : ""}">${(d.picks || []).filter((x) => !x.target_id).length}<em>건</em></b></div>
           <div class="stat"><small>성비 확인</small><b>${men.length === women.length ? "균형" : "차이 " + Math.abs(men.length - women.length)}<em></em></b></div>
         </section>
         <div class="two">
@@ -226,6 +277,8 @@
             <p class="note">매칭된 상대의 연락처는 참가자 본인 화면에서 결과 발표 후에만 전달돼요.</p>
           </section>
         </div>
+        ${picksPanel(d)}
+        ${addPanel()}
         <section style="display:grid;gap:10px"><div class="toolbar"><div class="sec-title"><h2>설문 결과</h2><span>${d.surveys.length}명 응답</span></div>
           <div><button class="btn sm ghost" data-act="csv-survey">설문 CSV</button><button class="btn sm ghost" data-act="csv-match">매칭 CSV</button></div></div>
           ${surveyCards(d.surveys)}</section>
@@ -254,6 +307,29 @@
 
   const actions = {
     refresh: () => run(async () => {}),
+    "pick-toggle": (t) => { S.openPick[t.dataset.id] = !S.openPick[t.dataset.id]; delete S.pickEdit[t.dataset.id]; render(); },
+    "pick-save": (t) => {
+      const id = t.dataset.id;
+      const sel = Array.from(document.querySelectorAll(`select[data-pick-for="${id}"]`)).map((x) => x.value).filter(Boolean);
+      if (new Set(sel).size !== sel.length) return toast("같은 사람을 두 번 골랐어요.");
+      run(async () => { await api.admin.setPicks(S.pin, id, sel); delete S.pickEdit[id]; toast("선택을 저장했어요."); });
+    },
+    "csv-picks": () => {
+      const ppl = S.data.participants, picks = S.data.picks || [];
+      const rows = [["번호", "성별", "이름", ...Array.from({ length: MAX_PICKS }, (_, i) => (i + 1) + "순위")]];
+      ppl.forEach((p) => {
+        const mine = picks.filter((x) => x.participant_id === p.id).sort((a, b) => a.rank - b.rank);
+        rows.push([p.number, p.gender === "M" ? "남" : "여", p.name, ...Array.from({ length: MAX_PICKS }, (_, i) => (mine[i] ? pickLabel(mine[i]) : ""))]);
+      });
+      downloadCSV("picks-" + S.round.replace(/[\\/]/g, "-") + ".csv", rows);
+    },
+    "edit-person": (t) => {
+      const p = S.data.participants.find((x) => x.id === t.dataset.id);
+      if (!p) return;
+      S.add = { open: true, editing: true, round: "", name: p.name || "", gender: p.gender, phone: fmtPhone(p.phone), number: String(p.number), age: p.age_label || "", school: p.school || "", mbti: p.mbti || "", hobby: p.hobby || "" };
+      render(); document.getElementById("add-details")?.scrollIntoView({ block: "center" });
+    },
+    "add-cancel": () => { S.add = emptyAdd(); S.add.open = false; render(); },
     round: (t) => { S.round = t.dataset.v; S.confirm = ""; run(async () => {}); },
     toggle: (t) => { S.open[t.dataset.id] = !S.open[t.dataset.id]; render(); },
     logout: () => { try { sessionStorage.removeItem("rn_admin_pin"); } catch (e) { /* noop */ } S.pin = ""; S.data = null; render(); },
@@ -323,6 +399,13 @@
     else if (t.id === "imp-round") { im.roundName = t.value; }
     else if (t.id === "imp-numbered") { im.numberedOnly = t.checked; render(); }
     else if (t.id === "imp-prune") { im.prune = t.checked; S.confirm = ""; render(); }
+    else if (t.id === "only-bad") { S.onlyBad = t.checked; render(); }
+    else if (t.dataset && t.dataset.pickFor) {
+      const id = t.dataset.pickFor;
+      const cur = S.pickEdit[id] || Array.from({ length: MAX_PICKS }, (_, i) => { const sel = document.querySelector(`select[data-pick-for="${id}"][data-slot="${i}"]`); return sel ? sel.value : ""; });
+      cur[Number(t.dataset.slot)] = t.value; S.pickEdit[id] = cur;
+    }
+    else if (t.name === "add-gender") { S.add.gender = t.value; }
     else if (t.classList && t.classList.contains("numin")) {
       const n = parseInt(t.value, 10);
       if (!(n >= 1) || String(n) === t.dataset.old) { t.value = t.dataset.old; return; }
@@ -331,14 +414,36 @@
   });
   document.addEventListener("input", (e) => {
     if (e.target.id === "imp-text") S.imp.text = e.target.value;
+    if (e.target.id && e.target.id.startsWith("add-") && e.target.id !== "add-details") {
+      const k = e.target.id.slice(4);
+      if (k === "phone") { const d = e.target.value.replace(/\D/g, "").slice(0, 11); e.target.value = d.length <= 3 ? d : d.length <= 7 ? d.slice(0, 3) + "-" + d.slice(3) : d.slice(0, 3) + "-" + d.slice(3, 7) + "-" + d.slice(7); }
+      S.add[k] = e.target.value;
+    }
     if (e.target.id === "pin") {   // 마스터키도 010-1234-5678 형태로 정리
       const d = e.target.value.replace(/\D/g, "").slice(0, 11);
       e.target.value = d.length <= 3 ? d : d.length <= 7 ? d.slice(0, 3) + "-" + d.slice(3) : d.slice(0, 3) + "-" + d.slice(3, 7) + "-" + d.slice(7);
     }
   });
-  document.addEventListener("toggle", (e) => { if (e.target.id === "imp-details") S.imp.open = e.target.open; }, true);
+  document.addEventListener("toggle", (e) => { if (e.target.id === "imp-details") S.imp.open = e.target.open; if (e.target.id === "add-details") S.add.open = e.target.open; }, true);
   document.addEventListener("submit", async (e) => {
     e.preventDefault();
+    if (e.target.id === "f-add") {
+      const a = S.add, phone = normPhone(a.phone), name = a.name.trim();
+      const rid = S.data.round ? S.round : String(a.round || "").trim();
+      if (!rid) return toast("회차 이름을 적어 주세요.");
+      if (!name) return toast("이름을 적어 주세요.");
+      if (!a.gender) return toast("성별을 골라 주세요.");
+      if (!/^01\d{8,9}$/.test(phone)) return toast("연락처를 정확히 입력해 주세요.");
+      const row = { phone, gender: a.gender, name, number: a.number ? parseInt(a.number, 10) : null, age_label: Roster.normAge(a.age), school: a.school.trim(), mbti: Roster.normMbti(a.mbti), hobby: a.hobby.trim() };
+      const label = S.data.round ? S.data.round.label : rid;
+      run(async () => {
+        const r = await api.admin.import(S.pin, rid, label, [row], false);
+        S.round = rid;
+        toast(name + (r.inserted ? "님을 추가했어요." : "님 정보를 수정했어요."));
+        S.add = emptyAdd();
+      });
+      return;
+    }
     if (e.target.id !== "f-pin") return;
     S.pin = (document.getElementById("pin").value || "").replace(/\D/g, "");
     try {

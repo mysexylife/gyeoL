@@ -43,7 +43,7 @@
   async function loadData() {
     S.notes = await api.getNotes();
     S.mine = await api.getMyPicks();
-    S.draftInputs = [0, 1, 2].map((i) => (S.mine.picks[i] ? String(S.mine.picks[i].number) : ""));
+    S.draftInputs = [0, 1, 2].map((i) => { const p = S.mine.picks[i]; return p ? (p.resolved ? String(p.number) : p.input || "") : ""; });
     S.draftAnswers = JSON.parse(JSON.stringify(S.mine.answers || {}));
     S.resultsOpen = !!(await api.getStatus()).results_open;
     S.result = S.resultsOpen ? await api.getResult() : null;
@@ -57,6 +57,11 @@
     if (!S.me) return;
     try {
       const open = !!(await api.getStatus()).results_open;
+      if (open && S.resultsOpen) {   // 공개된 뒤 진행자가 선택을 조정하면 결과도 바로 바뀐다
+        const r = await api.getResult();
+        if (JSON.stringify(r) !== JSON.stringify(S.result)) { S.result = r; render(); }
+        return;
+      }
       if (open === S.resultsOpen) return;
       S.resultsOpen = open;
       S.result = open ? await api.getResult() : null;
@@ -150,19 +155,21 @@
 
   /* ───────── 뷰: 최종 선택 ───────── */
   function pickView() {
-    const guide = howto("최종 선택", `오늘 마음에 든 이성을 최대 ${MAX_PICKS}명까지 <b>번호 또는 이름만</b> 적어 제출하는 곳이에요. 이름은 <b>성+이름</b>으로 적어 주세요. 서로 선택하면 매칭돼요. 제출은 언제든 할 수 있고 고쳐서 다시 낼 수 있어요. 매칭 결과는 진행자가 공개하면 이 탭에서 확인해요.`);
+    const guide = howto("최종 선택", `오늘 마음에 든 이성을 최대 ${MAX_PICKS}명까지 <b>번호 또는 이름만</b> 적어 제출하는 곳이에요. 이름은 <b>성+이름</b>으로 적어 주세요. 서로 선택하면 매칭돼요. 정확히 맞지 않게 적어도 제출돼요. 진행자가 확인해서 맞춰 드려요. 제출은 언제든 할 수 있고 고쳐서 다시 낼 수 있어요. 매칭 결과는 진행자가 공개하면 이 탭에서 확인해요.`);
     if (S.resultsOpen) return guide + resultView();
     if (S.mine.submitted && !S.editSel) {
       const ps = S.mine.picks;
       return `${guide}<div class="done">제출 완료! 응답이 집계됐어요.</div>
         <p class="note"><b>매칭 결과는 오늘 중으로 이 사이트(gyeoL)에서 전달드릴 예정이에요.</b> 진행자가 결과를 공개하면 이 탭에서 확인할 수 있어요. 서로 선택한 분이 있다면 그때 연락처가 함께 열려요.</p>
-        <div class="panel"><h2>내가 적은 사람</h2>${ps.length ? `<div class="rows">${ps.map((p, i) => `<div class="row on"><span class="rk">${i + 1}</span><span class="rn">${p.number}</span><span class="rm"><b>${esc(p.name)}</b></span><span></span></div>`).join("")}</div>` : `<p class="sub">적은 사람이 없어요.</p>`}</div>
+        <div class="panel"><h2>내가 적은 사람</h2>${ps.length ? `<div class="rows">${ps.map((p) => p.resolved
+          ? `<div class="row on"><span class="rk">${p.rank}</span><span class="rn">${p.number}</span><span class="rm"><b>${esc(p.name)}</b></span><span></span></div>`
+          : `<div class="row warn"><span class="rk">${p.rank}</span><span class="rn">?</span><span class="rm"><b>${esc(p.input)}</b><small>정확히 맞는 사람을 못 찾았어요. 진행자가 확인해 드려요.</small></span><span></span></div>`).join("")}</div>` : `<p class="sub">적은 사람이 없어요.</p>`}</div>
         <button class="btn ghost" data-act="editsel">선택·설문 수정하기</button><p class="note">결과가 공개되기 전까지는 언제든 고쳐서 다시 제출할 수 있어요.</p>`;
     }
     return `${guide}
       <div class="sec-title"><h2>최종 선택</h2><span>최대 ${MAX_PICKS}명</span></div>
       <section class="panel">
-        <p class="sub" style="font-size:13px"><b>번호 또는 이름만</b> 적어 주세요. 이름은 <b>성+이름</b>으로 적어요 (예: 3 / 김지은). 순서가 <b>1순위, 2순위, 3순위</b>예요. 다 채우지 않아도 괜찮고, 순서는 상대에게 알려지지 않아요.</p>
+        <p class="sub" style="font-size:13px"><b>번호 또는 이름만</b> 적어 주세요. 이름은 <b>성+이름</b>으로 적어요 (예: 3 / 김지은). 순서가 <b>1순위, 2순위, 3순위</b>예요. 다 채우지 않아도 괜찮고, 순서는 상대에게 알려지지 않아요. 정확히 맞지 않아도 제출되고, 진행자가 확인해서 맞춰 드려요.</p>
         ${[0, 1, 2].map((i) => `<div class="pkfield"><label for="pk${i}">${i + 1}순위</label><input id="pk${i}" type="text" data-bind="pick" data-i="${i}" placeholder="번호 또는 성+이름 (예: 3, 김지은)" value="${esc(S.draftInputs[i])}" autocomplete="off" enterkeyhint="next"></div>`).join("")}
       </section>
       <section class="panel"><h2>참가 후기 설문</h2><p class="sub" style="font-size:13px">익명으로 집계돼요. 최종 선택과 함께 제출됩니다.</p>${surveyHTML()}</section>
@@ -175,7 +182,7 @@
     const hits = res.filter((r) => r.mutual).length;
     return `<div class="sec-title"><h2>매칭 결과</h2><span>서로 선택 ${hits}명</span></div>
       ${res.length === 0 ? `<div class="empty"><b>선택한 사람이 없어요</b><p>다음 모임에서 또 만나요.</p></div>` : ""}
-      ${res.map((r) => r.mutual ? `<article class="res hit">
+      ${res.map((r) => !r.resolved ? `<article class="res"><div class="who"><b>?</b><span>${esc(r.input)}</span><span class="badge">확인 필요</span></div><p class="gentle">적어 주신 내용과 맞는 참가자를 찾지 못했어요. 운영진에게 알려 주세요.</p></article>` : r.mutual ? `<article class="res hit">
           <div class="who"><b>${r.number}번</b><span>${esc(r.name)}</span><span class="badge">서로 선택</span></div>
           <p>${esc([r.age_label, splitSchool(r.school).filter(Boolean).join(" ")].filter(Boolean).join(" · "))}</p>
           <div class="phone">${esc(fmtPhone(r.phone))}</div>
@@ -352,7 +359,8 @@
       guarded(async () => {
         const res = await api.submitPicks(inputs, S.draftAnswers);
         S.mine = await api.getMyPicks(); S.editSel = false; window.scrollTo(0, 0);
-        toast(res.picks.length ? "제출했어요. " + res.picks.map((p) => p.number + "번 " + p.name).join(", ") : "제출했어요.");
+        const bad = res.picks.filter((p) => !p.resolved).length;
+        toast(bad ? "제출했어요. 정확히 맞지 않은 " + bad + "건은 진행자가 확인해요." : "제출했어요.");
       });
     },
     copy: async (t) => {

@@ -84,10 +84,24 @@ create table if not exists public.notes (
 
 create table if not exists public.picks (
   participant_id uuid not null references public.participants(id) on delete cascade,
-  target_id      uuid not null references public.participants(id) on delete cascade,
   rank           int  not null,
-  primary key (participant_id, target_id)
+  target_id      uuid references public.participants(id) on delete cascade,  -- 명단에서 못 찾은 입력은 null (진행자가 맞춰 준다)
+  input_text     text,                                                       -- 참가자가 적은 그대로
+  primary key (participant_id, rank)
 );
+-- v4 까지의 picks (PK = participant_id, target_id) 를 새 구조로 바꾼다
+alter table public.picks add column if not exists input_text text;
+alter table public.picks alter column target_id drop not null;
+do $$ begin
+  if not exists (select 1 from information_schema.key_column_usage k
+                 where k.table_schema = 'public' and k.table_name = 'picks'
+                   and k.constraint_name = 'picks_pkey' and k.column_name = 'rank') then
+    alter table public.picks drop constraint if exists picks_pkey;
+    alter table public.picks add primary key (participant_id, rank);
+  end if;
+end $$;
+create unique index if not exists picks_participant_target_idx
+  on public.picks (participant_id, target_id) where target_id is not null;
 
 create table if not exists public.surveys (
   participant_id uuid primary key references public.participants(id) on delete cascade,
@@ -208,11 +222,16 @@ end $$;
 -- 최종 선택 + 설문 제출. 결과가 열리기 전에는 언제든 다시 제출(덮어쓰기)할 수 있다.
 -- p_inputs: 이성 번호(예: '3') 또는 이름(예: '지은') 최대 3개. 같은 회차의 이성 참가자로 찾아 저장한다.
 -- 반환: {picks:[{number,name}]}  (참가자가 오타를 확인할 수 있게)
+-- 최종 선택 + 설문 제출. 결과가 공개되기 전에는 언제든 다시 제출(덮어쓰기)할 수 있다.
+-- p_inputs: 이성 번호(예: '3') 또는 성+이름(예: '김지은') 최대 3개.
+--   같은 회차의 이성 참가자로 정확히 찾으면 연결하고, 못 찾으면 적은 글자 그대로 저장한다 (진행자가 나중에 맞춘다).
 create or replace function public.submit_picks(p_token uuid, p_inputs text[], p_survey jsonb)
 returns jsonb language plpgsql security definer set search_path = public as $$
 declare
   me public.participants; mx int; ro boolean;
-  ids uuid[] := '{}'; x text; t uuid; k int;
+  x text; t uuid; k int; rk int := 0;
+  seen uuid[] := '{}';
+  typed text[] := '{}';
 begin
   select * into me from public.participants where id = public._me(p_token);
   select results_open into ro from public.rounds where id = me.round_id;
@@ -220,41 +239,45 @@ begin
   select max_picks into mx from public.app_settings where id = 1;
 
   foreach x in array coalesce(p_inputs, '{}') loop
-    x := btrim(coalesce(x, ''));
-    if x = '' then continue; end if;
+    x := left(btrim(coalesce(x, '')), 40);
+    if x <> '' then typed := typed || x; end if;
+  end loop;
+  if coalesce(cardinality(typed), 0) > mx then raise exception 'too_many'; end if;
+
+  delete from public.picks where participant_id = me.id;
+  foreach x in array typed loop
     t := null;
     if x ~ '^\d{1,3}$' then
       select id into t from public.participants
        where round_id = me.round_id and gender <> me.gender and number = x::int;
-      if t is null then raise exception 'not_found' using detail = x; end if;
     else
       select count(*) into k from public.participants
        where round_id = me.round_id and gender <> me.gender
          and lower(replace(name, ' ', '')) = lower(replace(x, ' ', ''));
-      if k = 0 then raise exception 'not_found' using detail = x; end if;
-      if k > 1 then raise exception 'ambiguous_name' using detail = x; end if;
-      select id into t from public.participants
-       where round_id = me.round_id and gender <> me.gender
-         and lower(replace(name, ' ', '')) = lower(replace(x, ' ', ''));
+      if k = 1 then
+        select id into t from public.participants
+         where round_id = me.round_id and gender <> me.gender
+           and lower(replace(name, ' ', '')) = lower(replace(x, ' ', ''));
+      end if;
     end if;
-    if t = any(ids) then raise exception 'duplicate_pick' using detail = x; end if;
-    ids := ids || t;
+    if t is not null then
+      if t = any(seen) then continue; end if;      -- 같은 사람을 두 번 적었으면 한 번만
+      seen := seen || t;
+    end if;
+    rk := rk + 1;
+    insert into public.picks (participant_id, rank, target_id, input_text) values (me.id, rk, t, x);
   end loop;
-  if coalesce(cardinality(ids), 0) > mx then raise exception 'too_many'; end if;
-
-  delete from public.picks where participant_id = me.id;
-  if cardinality(ids) > 0 then
-    insert into public.picks (participant_id, target_id, rank)
-    select me.id, u.id, u.ord::int from unnest(ids) with ordinality as u(id, ord);
-  end if;
 
   insert into public.surveys (participant_id, answers)
   values (me.id, coalesce(p_survey, '{}'::jsonb))
   on conflict (participant_id) do update set answers = excluded.answers, submitted_at = now();
 
-  return jsonb_build_object('picks', coalesce((
-    select jsonb_agg(jsonb_build_object('number', p.number, 'name', p.name) order by u.ord)
-    from unnest(ids) with ordinality as u(id, ord) join public.participants p on p.id = u.id), '[]'::jsonb));
+  return jsonb_build_object('picks', (
+    select coalesce(jsonb_agg(jsonb_build_object(
+      'rank', pk.rank, 'input', pk.input_text, 'resolved', pk.target_id is not null,
+      'number', p.number, 'name', p.name) order by pk.rank), '[]'::jsonb)
+    from public.picks pk left join public.participants p on p.id = pk.target_id
+    where pk.participant_id = me.id));
 end $$;
 
 create or replace function public.get_my_picks(p_token uuid)
@@ -263,8 +286,10 @@ declare pid uuid := public._me(p_token);
 begin
   return jsonb_build_object(
     'picks', coalesce((
-      select jsonb_agg(jsonb_build_object('number', p.number, 'name', p.name) order by pk.rank)
-      from public.picks pk join public.participants p on p.id = pk.target_id
+      select jsonb_agg(jsonb_build_object(
+        'rank', pk.rank, 'input', pk.input_text, 'resolved', pk.target_id is not null,
+        'number', p.number, 'name', p.name) order by pk.rank)
+      from public.picks pk left join public.participants p on p.id = pk.target_id
       where pk.participant_id = pid), '[]'::jsonb),
     'submitted', exists (select 1 from public.surveys where participant_id = pid),
     'answers', coalesce((select answers from public.surveys where participant_id = pid), '{}'::jsonb)
@@ -282,13 +307,15 @@ begin
   return (
     select coalesce(jsonb_agg(s.x order by (s.x->>'rank')::int), '[]'::jsonb) from (
       select jsonb_build_object(
-        'rank', pk.rank, 'number', t.number, 'name', t.name, 'age_label', t.age_label, 'school', t.school,
+        'rank', pk.rank, 'resolved', pk.target_id is not null, 'input', pk.input_text,
+        'number', t.number, 'name', t.name, 'age_label', t.age_label, 'school', t.school,
         'mutual', m.mutual,
         'phone', case when m.mutual then t.phone end) as x
       from public.picks pk
-      join public.participants t on t.id = pk.target_id
+      left join public.participants t on t.id = pk.target_id
       cross join lateral (
-        select exists (select 1 from public.picks b where b.participant_id = pk.target_id and b.target_id = pk.participant_id) as mutual
+        select exists (select 1 from public.picks b
+                       where b.participant_id = pk.target_id and b.target_id = pk.participant_id) as mutual
       ) m
       where pk.participant_id = me.id
     ) s
@@ -340,6 +367,14 @@ begin
         'age_label', p.age_label, 'school', p.school, 'mbti', p.mbti, 'hobby', p.hobby,
         'submitted', exists (select 1 from public.surveys s where s.participant_id = p.id)
       ) order by p.gender desc, p.number), '[]'::jsonb) from public.participants p where p.round_id = p_round),
+    -- 참가자별 최종 선택: target_id 가 없으면 명단에서 못 찾은 입력(진행자가 맞춰야 함)
+    'picks', (
+      select coalesce(jsonb_agg(jsonb_build_object(
+        'participant_id', pk.participant_id, 'rank', pk.rank, 'target_id', pk.target_id, 'input', pk.input_text,
+        'target_number', t.number, 'target_name', t.name) order by pk.participant_id, pk.rank), '[]'::jsonb)
+      from public.picks pk
+      join public.participants me on me.id = pk.participant_id and me.round_id = p_round
+      left join public.participants t on t.id = pk.target_id),
     'matches', (
       select coalesce(jsonb_agg(jsonb_build_object(
         'm_number', m.number, 'm_name', m.name, 'f_number', f.number, 'f_name', f.name
@@ -361,6 +396,32 @@ returns void language plpgsql security definer set search_path = public as $$
 begin
   perform public._check_admin(p_pin);
   update public.rounds set results_open = coalesce(p_open, false) where id = p_round;
+end $$;
+
+-- 한 참가자의 최종 선택을 진행자가 직접 정한다. (제출하지 않은 사람도 가능, 결과 공개 후에도 가능)
+-- p_targets: 선택한 상대의 participant id 를 1순위부터 순서대로 (최대 max_picks 개). 빈 배열이면 선택을 비운다.
+create or replace function public.admin_set_picks(p_pin text, p_participant uuid, p_targets uuid[])
+returns void language plpgsql security definer set search_path = public as $$
+declare me public.participants; mx int; cnt int := coalesce(cardinality(p_targets), 0);
+begin
+  perform public._check_admin(p_pin);
+  select * into me from public.participants where id = p_participant;
+  if not found then raise exception 'not_registered'; end if;
+  select max_picks into mx from public.app_settings where id = 1;
+  if cnt > mx then raise exception 'too_many'; end if;
+  if cnt > 0 then
+    if (select count(distinct x) from unnest(p_targets) x) <> cnt then raise exception 'invalid_target'; end if;
+    if exists (select 1 from unnest(p_targets) x
+               where not exists (select 1 from public.participants q
+                                 where q.id = x and q.round_id = me.round_id and q.gender <> me.gender)) then
+      raise exception 'invalid_target';
+    end if;
+  end if;
+  delete from public.picks where participant_id = me.id;
+  if cnt > 0 then
+    insert into public.picks (participant_id, rank, target_id, input_text)
+    select me.id, u.ord::int, u.id, null from unnest(p_targets) with ordinality as u(id, ord);
+  end if;
 end $$;
 
 create or replace function public.admin_set_number(p_pin text, p_id uuid, p_number int)
