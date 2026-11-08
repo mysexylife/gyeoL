@@ -97,7 +97,7 @@
     return `<section class="panel"><h2>참가자 입장 링크</h2>
       <div class="qrbox"><div class="qr" id="qr" aria-label="입장 QR 코드"></div>
         <div class="qrinfo"><p class="url" id="entry-url">${esc(entryUrl())}</p>
-          <button class="btn sm ghost" data-act="copy-url">링크 복사</button>
+          <div class="qrbtns"><button class="btn sm ghost" data-act="copy-url">링크 복사</button><button class="btn sm" data-act="qr-save">QR 이미지 저장 (인쇄용)</button></div>
           <p class="note">QR을 화면에 띄우거나 인쇄해 두세요. 참가자는 신청서에 적은 휴대폰 번호만 입력하면 들어와요.</p></div></div></section>`;
   }
   function drawQR() {
@@ -358,6 +358,21 @@
       const rows = [["성별", ...cols.map((c) => c[0])]];
       S.data.surveys.forEach((s) => rows.push([s.gender === "M" ? "남" : "여", ...cols.map((c) => c[1](s.answers || {}))]));
       downloadCSV("survey-" + S.round.replace(/[\\/]/g, "-") + ".csv", rows);
+    },
+    // 인쇄용 큰 QR 이미지(PNG, 흰 여백 포함)를 만들어 저장한다
+    "qr-save": () => {
+      if (typeof QRCode === "undefined") return toast("QR을 만들지 못했어요. 링크 복사를 이용해 주세요.");
+      const box = document.createElement("div");
+      new QRCode(box, { text: entryUrl(), width: 720, height: 720, correctLevel: QRCode.CorrectLevel.M });
+      const src = box.querySelector("canvas"), pad = 72, size = 720 + pad * 2;
+      const c = document.createElement("canvas"); c.width = c.height = size;
+      const g = c.getContext("2d"); g.fillStyle = "#fff"; g.fillRect(0, 0, size, size); g.drawImage(src, pad, pad);
+      c.toBlob((blob) => {
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob); a.download = "gyeol-qr.png"; document.body.appendChild(a); a.click();
+        setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+        toast("QR 이미지를 저장했어요.");
+      }, "image/png");
     },
     "copy-url": async () => {
       try { await navigator.clipboard.writeText(entryUrl()); toast("링크를 복사했어요."); }
