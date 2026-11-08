@@ -359,8 +359,6 @@ h1, h2, h3 { letter-spacing: -.015em; }
 .tabs .ico { display: grid; place-items: center; width: 40px; height: 28px; border-radius: 999px; transition: background .2s; }
 .tabs .ico svg { width: 23px; height: 23px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .tabs button.on .ico { background: var(--accent-soft); }
-.tabs button.on::before { content: ""; position: absolute; top: -7px; left: 50%; width: 30px; height: 6px; transform: translateX(-50%);
-  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='30' height='6' viewBox='0 0 30 6'%3E%3Cpath d='M0 3C5 0 10 6 15 3S25 0 30 3' fill='none' stroke='%23d4604f' stroke-width='1.8' stroke-linecap='round'/%3E%3C/svg%3E") center / 100% 100% no-repeat; }
 .tabs .bdg { position: absolute; top: 0; left: calc(50% + 6px); min-width: 17px; height: 17px; padding: 0 4px; border-radius: 9px; background: var(--accent); color: var(--accent-ink); font: 500 10.5px/17px "Jost", sans-serif; font-style: normal; text-align: center; }
 @media (prefers-reduced-motion: reduce) { .stack .flip, .stack .flip.deal { transition: none; animation: none; } }
 
@@ -506,3 +504,6 @@ details.panel[open] > summary { margin-bottom: 4px; }
 .pkfield label { font-weight: 700; font-size: 14px; color: var(--brand); }
 .resultbar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
 .resultbar .btn { margin-left: auto; }
+
+/* 로고 버튼: 누르면 홈(내 프로필) */
+button.brand { background: none; border: 0; padding: 4px 0; cursor: pointer; -webkit-tap-highlight-color: transparent; }

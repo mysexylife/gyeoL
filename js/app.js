@@ -239,7 +239,8 @@
 
   /* ───────── 렌더 ───────── */
   function header() {
-    return `<header class="top"><div class="brand">gyeoL</div><div class="top-r">${S.me ? `<span class="pill">${esc(S.me.round_label || "")}</span><button class="link" data-act="logout">나가기</button>` : ""}</div></header>
+    const logo = S.me ? `<button class="brand" type="button" data-act="home" aria-label="홈 (내 프로필)">gyeoL</button>` : `<div class="brand">gyeoL</div>`;
+    return `<header class="top">${logo}<div class="top-r">${S.me ? `<button class="link" data-act="logout">나가기</button>` : ""}</div></header>
       ${api.mode === "demo" ? `<div class="demo-bar">체험 모드 · 이 브라우저에만 저장돼요. 가짜 참가자가 함께 있어요. <a href="admin.html?demo">진행자 화면 (PIN: demo)</a></div>` : ""}`;
   }
 
@@ -279,6 +280,7 @@
 
   const actions = {
     tab: (t) => { flushAll(); S.draft = null; S.tab = t.dataset.v; S.error = ""; render(); window.scrollTo(0, 0); },
+    home: () => { flushAll(); S.tab = "mine"; S.error = ""; render(); window.scrollTo(0, 0); },
     mark: (t) => {
       const slot = t.dataset.slot, v = Number(t.dataset.v), n = noteOf(slot);
       const next = n.mark === v ? 0 : v;
@@ -363,7 +365,22 @@
     const t = e.target.closest("[data-act]");
     if (t && actions[t.dataset.act]) actions[t.dataset.act](t, e);
   });
+  // 휴대폰 번호는 입력하는 동안 010-1234-5678 형태로 자동 정리한다
+  function formatPhoneTyping(raw) {
+    let d = digits(raw);
+    if (/^\s*\+?82/.test(raw) && d.startsWith("82")) d = "0" + d.slice(2);
+    d = d.slice(0, 11);
+    if (d.length <= 3) return d;
+    if (d.length <= 7) return d.slice(0, 3) + "-" + d.slice(3);
+    return d.slice(0, 3) + "-" + d.slice(3, 7) + "-" + d.slice(7);
+  }
   document.addEventListener("input", (e) => {
+    if (e.target.id === "l-phone") {
+      const v = formatPhoneTyping(e.target.value);
+      if (v !== e.target.value) e.target.value = v;
+      S.draft = { phone: v };
+      return;
+    }
     const b = e.target.dataset && e.target.dataset.bind;
     if (b === "memo") {
       const slot = e.target.dataset.slot, n = noteOf(slot);
