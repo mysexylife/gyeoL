@@ -275,7 +275,7 @@
     const n = noteOf(slot);
     try { await api.saveNote(Number(slot), n.memo, n.mark); } catch (e) { toast("메모 저장에 실패했어요. 다시 시도해 주세요."); }
   }
-  function flushAll() { Object.keys(saveTimers).forEach(flushSave); }
+  function flushAll() { return Promise.all(Object.keys(saveTimers).map(flushSave)); }
 
   async function guarded(fn) {
     if (S.busy) return;
@@ -329,7 +329,7 @@
       guarded(async () => { await finishLogin(await api.login(phone, round)); });
     },
     backlogin: () => { S.choices = null; S.error = ""; render(); },
-    logout: async () => { flushAll(); await api.logout(); Object.assign(S, { me: null, choices: null, tab: "mine", notes: {}, result: null, resultsOpen: false, editSel: false }); render(); },
+    logout: async () => { await flushAll(); await api.logout(); Object.assign(S, { me: null, choices: null, tab: "mine", notes: {}, result: null, resultsOpen: false, editSel: false }); render(); },
     ans: (t) => {
       const q = SURVEY.find((x) => x.id === t.dataset.q);
       const raw = t.dataset.v, v = q.type === "scale" ? Number(raw) : raw;
@@ -400,6 +400,8 @@
     if (b === "ans") S.draftAnswers[e.target.dataset.q] = e.target.value;
     if (b === "pick") S.draftInputs[Number(e.target.dataset.i)] = e.target.value;
   });
+  // 메모 칸에서 손을 떼는 순간(다른 칸·탭 누르기) 바로 저장해서, 앱을 바로 닫아도 남도록 한다
+  document.addEventListener("focusout", (e) => { const t = e.target; if (t.dataset && t.dataset.bind === "memo" && saveTimers[t.dataset.slot]) flushSave(t.dataset.slot); });
   window.addEventListener("pagehide", flushAll);
   document.addEventListener("visibilitychange", () => { if (document.hidden) flushAll(); else poll(); });
 
