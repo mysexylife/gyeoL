@@ -249,7 +249,7 @@
 
   function dashView() {
     const d = S.data, rnd = d.round;
-    const head = `<header class="top"><div class="brand">gyeoL <small>진행자</small></div><div class="top-r">${rnd ? `<span class="pill">${esc(roundLabel(rnd.id))} · ${d.results_open ? "결과 공개" : "진행 중"}</span>` : ""}<button class="link" data-act="logout">나가기</button></div></header>
+    const head = `<header class="top"><div class="brand">gyeoL <small>진행자</small></div><div class="top-r"><button class="link" data-act="logout">나가기</button></div></header>
       ${api.mode === "demo" ? `<div class="demo-bar">체험 모드 · 참가자 화면과 같은 브라우저 데이터를 사용해요. <a href="index.html?demo">참가자 화면</a></div>` : ""}`;
     // 날짜(회차)가 하나도 없으면 '참가자 추가' 탭만 쓸 수 있다
     const tab = rnd ? S.tab : "add", badCount = (d.picks || []).filter((x) => !x.target_id).length;
