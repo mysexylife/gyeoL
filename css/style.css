@@ -548,3 +548,11 @@ button.brand { background: none; border: 0; padding: 4px 0; cursor: pointer; -we
 .roundsel label { font-size: 13px; font-weight: 700; color: var(--muted); flex: none; }
 .roundsel select { flex: 1; min-width: 0; border: 1px solid var(--accent); background: var(--surface); border-radius: 12px; padding: 10px 12px; font: 500 15px var(--sans); color: var(--ink); }
 .roundsel .rtag { flex: none; margin: 0; }
+
+/* 하단 탭: 오른쪽 아래에 뜨는 Netlify 로고와 겹치지 않도록 오른쪽을 비워 둔다 */
+.tabs { padding-right: max(84px, env(safe-area-inset-right, 0px)); }
+.stats.s3 { grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.stats.s3 .stat { padding: 10px 12px; }
+.stats.s3 .stat small { font-size: 11.5px; line-height: 1.3; }
+.stats.s3 .stat b { font-size: 24px; }
+.stats.s3 .stat b em { font-size: 12px; }

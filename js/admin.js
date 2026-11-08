@@ -199,7 +199,7 @@
     }).join("");
     return `<section style="display:grid;gap:10px"><div class="toolbar"><div class="sec-title"><h2>최종 선택 현황</h2><span>제출 ${ppl.filter((p) => p.submitted).length} / ${ppl.length}명 · <b class="${bad ? "badtxt" : ""}">확인 필요 ${bad}건</b></span></div>
         <div><label class="ck"><input type="checkbox" id="only-bad" ${S.onlyBad ? "checked" : ""}> 확인 필요만</label> <button class="btn sm ghost" data-act="csv-picks">선택 CSV</button></div></div>
-      <p class="note">참가자가 적은 최종 선택이에요. 참가자가 <b>자유롭게 적은 내용은 그대로 저장</b>돼서 여기에 전달돼요. 숫자는 명단에서 찾은 상대의 번호이고, <span class="pk mu">붉은 숫자</span>는 서로 선택한 경우, <span class="pk bad">노란 글자</span>는 명단에서 정확히 찾지 못해 적은 그대로 보여주는 거예요. 줄을 펼치면 <b>직접 맞추거나 바꿀 수 있어요</b> (제출하지 않은 사람도 가능). 결과를 공개하기 전에 <b>확인 필요</b>를 정리하세요.</p>
+      <p class="note"><span class="pk mu">붉은 숫자</span> 서로 선택 · <span class="pk bad">노란 글자</span> 명단에서 못 찾은 입력(적은 그대로). 줄을 펼치면 <b>직접 맞추거나 바꿀 수</b> 있어요.</p>
       ${rows ? `<div class="plist" role="list"><div class="phead pickhead"><span class="pn">번호</span><span>이름</span><span>성별</span><span>1·2·3순위</span><span></span></div>${rows}</div>` : `<div class="empty"><b>${S.onlyBad ? "확인이 필요한 선택이 없어요" : "아직 참가자가 없어요"}</b></div>`}</section>`;
   }
 
@@ -216,7 +216,7 @@
   function tabPicks(d, rnd) {
     const ppl = d.participants, submitted = ppl.filter((p) => p.submitted).length, bad = (d.picks || []).filter((x) => !x.target_id).length;
     return `<section class="panel"><div class="toolbar"><h2>${esc(roundLabel(rnd.id))} 매칭 결과</h2><button class="btn sm ghost" data-act="refresh">새로고침</button></div>
-        <p class="note">참가자는 <b>언제든</b> 최종 선택과 설문을 제출·수정할 수 있어요. 아래 버튼을 누르면 이 날짜의 <b>매칭 결과(서로 선택한 경우 연락처 포함)가 참가자 화면에 공개</b>되고, 그 뒤에는 선택을 더 바꿀 수 없어요. 공개 전에 '제출' 인원과 <b>확인 필요</b>를 확인하세요. 날짜마다 따로 공개해요.</p>
+        <p class="note">공개하면 참가자 화면에 <b>매칭 결과와 연락처</b>가 열리고, 이후엔 선택을 바꿀 수 없어요. 공개 전에 <b>확인 필요 0건</b>인지 확인하세요.</p>
         <div class="resultbar"><span class="tag ${d.results_open ? "y" : "n"}">${d.results_open ? "결과 공개 중" : "아직 비공개"}</span><span class="sub" style="font-size:13px">제출 ${submitted} / ${ppl.length}명 · 매칭 ${d.matches.length}쌍${bad ? ` · <b class="badtxt">확인 필요 ${bad}건</b>` : ""}</span>
           <button class="btn ${d.results_open ? "ghost" : ""}" style="width:auto" data-act="results" ${S.busy ? "disabled" : ""}>${d.results_open ? (S.confirm === "res-off" ? "한 번 더 눌러 공개 취소" : "공개 취소 (다시 제출 받기)") : S.confirm === "res-on" ? "한 번 더 눌러 공개" : "매칭 결과 공개하기"}</button></div></section>
       ${picksPanel(d)}
@@ -229,10 +229,10 @@
   function tabPeople(d, rnd) {
     const ppl = d.participants, men = ppl.filter((p) => p.gender === "M"), women = ppl.filter((p) => p.gender === "F");
     const submitted = ppl.filter((p) => p.submitted).length;
-    return `<section class="stats">
-        <div class="stat"><small>명단</small><b>${ppl.length}<em>명 (남 ${men.length} · 여 ${women.length})</em></b></div>
-        <div class="stat"><small>최종 선택·설문 제출</small><b>${submitted}<em>/ ${ppl.length}명</em></b></div>
-        <div class="stat"><small>성비 확인</small><b>${men.length === women.length ? "균형" : "차이 " + Math.abs(men.length - women.length)}<em></em></b></div>
+    return `<section class="stats s3">
+        <div class="stat"><small>남성 총원</small><b>${men.length}<em>명</em></b></div>
+        <div class="stat"><small>여성 총원</small><b>${women.length}<em>명</em></b></div>
+        <div class="stat"><small>선택·설문 제출</small><b>${submitted}<em>/ ${ppl.length}명</em></b></div>
       </section>
       <section style="display:grid;gap:10px"><div class="toolbar"><div class="sec-title"><h2>참가자</h2><span>연락처는 진행자만 볼 수 있어요</span></div><button class="btn sm ghost" data-act="csv-people">참가자 CSV</button></div>
         ${participantList(ppl)}</section>
