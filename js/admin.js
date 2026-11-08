@@ -5,13 +5,6 @@
   const Roster = window.Roster;
   const $app = document.getElementById("app");
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-  const PHASES = [
-    ["registration", "준비", "명단·번호 확인"],
-    ["rotation", "로테이션", "카드·메모 열림"],
-    ["selection", "최종 선택", "선택 + 설문"],
-    ["result", "결과 발표", "매칭·연락처"],
-  ];
-  const PHASE_NAME = Object.fromEntries(PHASES.map((p) => [p[0], p[1]]));
 
   const S = { pin: "", data: null, error: "", confirm: "", busy: false, round: "", rounds: [], open: {},
     imp: { open: true, text: "", fileName: "", table: null, map: {}, date: "", numberedOnly: false, prune: false, done: null, error: "" } };
@@ -28,7 +21,7 @@
   async function load() {
     S.rounds = await api.admin.rounds(S.pin);
     if (!S.rounds.some((r) => r.id === S.round)) S.round = S.rounds.length ? S.rounds[0].id : "";
-    S.data = S.round ? await api.admin.dashboard(S.pin, S.round) : { round: null, phase: "registration", participants: [], matches: [], surveys: [] };
+    S.data = S.round ? await api.admin.dashboard(S.pin, S.round) : { round: null, results_open: false, participants: [], matches: [], surveys: [] };
     try { sessionStorage.setItem("rn_admin_round", S.round); } catch (e) { /* 무시 */ }
   }
 
@@ -151,7 +144,6 @@
         <p class="sum"><b>${b.rows.length}명</b> 가져와요 <span class="sub">(남 ${b.counts.M} · 여 ${b.counts.F})</span></p>
         ${errs.map((x) => `<p class="err">${esc(x)}</p>`).join("")}${warns.map((x) => `<p class="note">${esc(x)}</p>`).join("")}
         ${b.rows.length ? `<div class="tbl-wrap"><table><thead><tr><th class="num">번호</th><th>성별</th><th>이름</th><th>나이</th><th>대학·학과</th><th>MBTI</th><th>취미</th><th>연락처</th></tr></thead><tbody>${b.rows.slice(0, 8).map((p) => `<tr><td class="num">${p.number ?? "자동"}</td><td>${p.gender === "M" ? "남" : "여"}</td><td>${esc(p.name)}</td><td>${esc(p.age_label)}</td><td>${esc(p.school)}</td><td>${esc(p.mbti)}</td><td>${esc(p.hobby)}</td><td>${maskPhone(p.phone)}</td></tr>`).join("")}</tbody></table></div>${b.rows.length > 8 ? `<p class="sub" style="font-size:12.5px">… 외 ${b.rows.length - 8}명</p>` : ""}` : ""}
-        ${d.phase !== "registration" ? `<p class="note">지금은 '${PHASE_NAME[d.phase]}' 단계예요. 번호나 정보가 바뀌면 참가자 화면에 바로 반영돼요.</p>` : ""}
         <div class="toolbar"><span class="sub" style="font-size:12.5px">${im.fileName ? esc(im.fileName) : "붙여넣은 내용"} · 이상형·사진·입금·추가요청 열은 읽지 않고 서버로 보내지 않아요.</span>
           <button class="btn" style="width:auto" data-act="imp-run" ${canRun ? "" : "disabled"}>${S.confirm === "imp" ? "삭제가 포함돼요. 한 번 더 눌러 실행" : `${b.rows.length}명 가져오기`}</button></div>`;
     }
@@ -178,7 +170,7 @@
   /* ───────── 회차 선택 + 참가자 목록(컴팩트) ───────── */
   function roundBar() {
     if (!S.rounds.length) return "";
-    return `<nav class="roundbar" aria-label="회차">${S.rounds.map((r) => `<button class="rchip ${r.id === S.round ? "on" : ""}" data-act="round" data-v="${esc(r.id)}" aria-pressed="${r.id === S.round}"><b>${esc(r.label)}</b><small>${r.count}명 · ${PHASE_NAME[r.phase]}</small></button>`).join("")}</nav>`;
+    return `<nav class="roundbar" aria-label="회차">${S.rounds.map((r) => `<button class="rchip ${r.id === S.round ? "on" : ""}" data-act="round" data-v="${esc(r.id)}" aria-pressed="${r.id === S.round}"><b>${esc(r.label)}</b><small>${r.count}명 · ${r.results_open ? "결과 공개" : "진행 중"}</small></button>`).join("")}</nav>`;
   }
   // 한 줄: 번호 · 이름 · 성별 · 연락처 + 펼치기 버튼.  자세한 정보는 펼쳤을 때만 보인다.
   function participantList(ppl) {
@@ -205,7 +197,7 @@
     const men = ppl.filter((p) => p.gender === "M"), women = ppl.filter((p) => p.gender === "F");
     const submitted = ppl.filter((p) => p.submitted).length;
     const rnd = S.data.round;
-    const pill = rnd ? `${esc(rnd.label)} · ${PHASE_NAME[d.phase]}` : "회차 없음";
+    const pill = rnd ? `${esc(rnd.label)} · ${d.results_open ? "결과 공개" : "진행 중"}` : "회차 없음";
     const head = `<header class="top"><div class="brand">gyeoL <small>진행자</small></div><div class="top-r"><span class="pill">${pill}</span><button class="link" data-act="logout">나가기</button></div></header>
       ${api.mode === "demo" ? `<div class="demo-bar">체험 모드 · 참가자 화면과 같은 브라우저 데이터를 사용해요. <a href="index.html?demo">참가자 화면</a></div>` : ""}`;
     if (!rnd) {
@@ -215,9 +207,10 @@
     }
     return `${head}${roundBar()}
       <main class="wrap wide">
-        <section class="panel"><div class="toolbar"><h2>${esc(rnd.label)} 진행 단계</h2><button class="btn sm ghost" data-act="refresh">새로고침</button></div>
-          <div class="stepper">${PHASES.map(([k, n, sub]) => `<button class="step ${d.phase === k ? "on" : S.confirm === k ? "ask" : ""}" data-act="phase" data-v="${k}" ${S.busy ? "disabled" : ""}>${S.confirm === k ? "한 번 더 눌러 변경" : n}<small>${S.confirm === k ? n : sub}</small></button>`).join("")}</div>
-          <p class="note">순서대로 진행하세요. 참가자가 모두 제출하면 '제출' 개수가 맞는지 확인한 뒤 <b>결과 발표</b>로 바꾸세요. 바꾸는 즉시 이 회차 참가자 화면에 매칭 결과와 연락처가 열려요. 단계는 회차마다 따로 움직여요.</p></section>
+        <section class="panel"><div class="toolbar"><h2>${esc(rnd.label)} 매칭 결과</h2><button class="btn sm ghost" data-act="refresh">새로고침</button></div>
+          <p class="note">참가자는 <b>언제든</b> 최종 선택과 설문을 제출·수정할 수 있어요. 아래 버튼을 누르면 이 회차의 <b>매칭 결과(서로 선택한 경우 연락처 포함)가 참가자 화면에 공개</b>되고, 그 뒤에는 선택을 더 바꿀 수 없어요. 공개 전에 '제출' 인원을 확인하세요. 회차마다 따로 공개해요.</p>
+          <div class="resultbar"><span class="tag ${d.results_open ? "y" : "n"}">${d.results_open ? "결과 공개 중" : "아직 비공개"}</span><span class="sub" style="font-size:13px">제출 ${submitted} / ${ppl.length}명 · 매칭 ${d.matches.length}쌍</span>
+            <button class="btn ${d.results_open ? "ghost" : ""}" style="width:auto" data-act="results" ${S.busy ? "disabled" : ""}>${d.results_open ? (S.confirm === "res-off" ? "한 번 더 눌러 공개 취소" : "공개 취소 (다시 제출 받기)") : S.confirm === "res-on" ? "한 번 더 눌러 공개" : "매칭 결과 공개하기"}</button></div></section>
         <section class="stats">
           <div class="stat"><small>명단</small><b>${ppl.length}<em>명 (남 ${men.length} · 여 ${women.length})</em></b></div>
           <div class="stat"><small>최종 선택·설문 제출</small><b>${submitted}<em>/ ${ppl.length}명</em></b></div>
@@ -238,7 +231,7 @@
           ${surveyCards(d.surveys)}</section>
         ${importPanel(d)}
         ${entryPanel()}
-        <section class="panel"><h2>${esc(rnd.label)} 초기화</h2><p class="sub" style="font-size:13px">이 회차의 모든 참가자, 메모, 선택, 설문을 지우고 '준비' 단계로 돌립니다. 다른 회차는 그대로예요. 되돌릴 수 없으니 먼저 CSV를 내려받으세요.</p>
+        <section class="panel"><h2>${esc(rnd.label)} 초기화</h2><p class="sub" style="font-size:13px">이 회차의 모든 참가자, 메모, 선택, 설문을 지우고 결과 공개도 닫습니다. 다른 회차는 그대로예요. 되돌릴 수 없으니 먼저 CSV를 내려받으세요.</p>
           <button class="btn danger sm" style="justify-self:start" data-act="reset">${S.confirm === "reset" ? "정말 모두 삭제합니다" : "이 회차 초기화"}</button></section>
       </main>`;
   }
@@ -264,11 +257,10 @@
     round: (t) => { S.round = t.dataset.v; S.confirm = ""; run(async () => {}); },
     toggle: (t) => { S.open[t.dataset.id] = !S.open[t.dataset.id]; render(); },
     logout: () => { try { sessionStorage.removeItem("rn_admin_pin"); } catch (e) { /* noop */ } S.pin = ""; S.data = null; render(); },
-    phase: (t) => {
-      const k = t.dataset.v;
-      if (k === S.data.phase) return;
-      if (S.confirm !== k) return askConfirm(k);
-      run(async () => { await api.admin.setPhase(S.pin, S.round, k); toast("'" + PHASE_NAME[k] + "' 단계로 바꿨어요."); });
+    results: () => {
+      const open = !S.data.results_open, key = open ? "res-on" : "res-off";
+      if (S.confirm !== key) return askConfirm(key);
+      run(async () => { await api.admin.setResults(S.pin, S.round, open); toast(open ? "매칭 결과를 공개했어요." : "공개를 취소했어요."); });
     },
     remove: (t) => {
       const key = "rm" + t.dataset.id;

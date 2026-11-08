@@ -4,6 +4,7 @@
   const isDemo = new URLSearchParams(location.search).has("demo") || !cfg.supabaseUrl || !cfg.supabaseAnonKey;
 
   const MAX_PICKS = 3;
+  const MEMO_SLOTS = 9;   // 메모장 칸 수 (이성 번호 1~9)
 
   // 참가 후기 설문 (준비해 주신 PDF 문항). type: scale | multi | matrix | choice | text
   // 문항을 바꿔도 DB 수정은 필요 없습니다. (answers 는 JSON 으로 저장)
@@ -22,14 +23,13 @@
   ];
 
   const ERRORS = {
-    not_authenticated: "다시 입장해 주세요.",
     bad_phone: "휴대폰 번호를 정확히 입력해 주세요.",
+    not_authenticated: "다시 입장해 주세요.",
     not_registered: "명단에 없는 번호예요. 신청서에 적은 연락처가 맞는지 확인해 주세요.",
-    cards_closed: "아직 카드가 열리지 않았어요.",
-    selection_closed: "지금은 최종 선택 시간이 아니에요.",
-    too_many: "최대 " + MAX_PICKS + "명까지 고를 수 있어요.",
-    invalid_target: "선택할 수 없는 상대가 포함되어 있어요.",
-    not_ready: "아직 결과가 공개되지 않았어요.",
+    too_many: "최대 " + MAX_PICKS + "명까지 적을 수 있어요.",
+    result_published: "매칭 결과가 이미 공개되어 선택을 바꿀 수 없어요.",
+    not_ready: "아직 매칭 결과가 공개되지 않았어요.",
+    invalid_slot: "메모 칸 번호가 올바르지 않아요.",
     bad_pin: "진행자 비밀번호가 맞지 않아요.",
     round_required: "가져올 회차를 정해 주세요.",
     number_taken: "같은 성별에 이미 쓰고 있는 번호예요.",
@@ -37,10 +37,15 @@
     participants_round_gender_number_key: "같은 성별에 번호가 겹쳐요. 시트에서 연락처를 바꾼 사람이 있다면, 아래 표에서 이전 행을 삭제하거나 '기존 참가자 삭제' 옵션을 켜고 다시 가져와 주세요.",
     "Failed to fetch": "네트워크 연결을 확인해 주세요.",
   };
+  // 서버 오류는 "코드 :: 자세한 내용" 형태로 온다
   function friendly(err) {
     const msg = (err && err.message) || String(err);
-    for (const k in ERRORS) if (msg.includes(k)) return ERRORS[k];
-    return "문제가 생겼어요: " + msg;
+    const [head, detail] = msg.split(" :: ");
+    if (head.includes("not_found")) return "'" + detail + "'에 해당하는 번호나 이름을 찾지 못했어요.";
+    if (head.includes("ambiguous_name")) return "'" + detail + "' 이름이 여러 명이에요. 번호로 적어 주세요.";
+    if (head.includes("duplicate_pick")) return "'" + detail + "'은(는) 이미 적었어요.";
+    for (const k in ERRORS) if (head.includes(k)) return ERRORS[k];
+    return "문제가 생겼어요: " + head;
   }
 
   /* ───────────── 공용 도우미 ───────────── */
@@ -76,7 +81,7 @@
     const setTok = (t) => { try { if (t) localStorage.setItem(KEY, t); else localStorage.removeItem(KEY); } catch (e) { /* 저장소 사용 불가 */ } };
     const rpc = async (name, args) => {
       const { data, error } = await sb.rpc(name, args || {});
-      if (error) throw new Error(error.message);
+      if (error) throw new Error(error.message + (error.details ? " :: " + error.details : ""));
       return data;
     };
     const authed = (name, args) => rpc(name, Object.assign({ p_token: getTok() }, args));
@@ -95,17 +100,16 @@
         catch (e) { if (String(e.message).includes("not_authenticated")) { setTok(null); return null; } throw e; }
       },
       async logout() { const t = getTok(); setTok(null); if (t) { try { await rpc("logout", { p_token: t }); } catch (e) { /* 무시 */ } } },
-      getPhase: () => authed("get_phase"),
-      getCards: () => authed("get_cards"),
+      getStatus: () => authed("get_status"),
       async getNotes() { return (await authed("get_notes")) || {}; },
-      saveNote: (id, memo, mark) => authed("save_note", { p_target: id, p_memo: memo, p_mark: mark }),
+      saveNote: (slot, memo, mark) => authed("save_note", { p_slot: slot, p_memo: memo, p_mark: mark }),
       getMyPicks: () => authed("get_my_picks"),
-      submitPicks: (ids, survey) => authed("submit_picks", { p_targets: ids, p_survey: survey }),
+      submitPicks: (inputs, survey) => authed("submit_picks", { p_inputs: inputs, p_survey: survey }),
       getResult: () => authed("get_result"),
       admin: {
         rounds: (pin) => rpc("admin_rounds", { p_pin: pin }),
         dashboard: (pin, round) => rpc("admin_dashboard", { p_pin: pin, p_round: round }),
-        setPhase: (pin, round, phase) => rpc("admin_set_phase", { p_pin: pin, p_round: round, p_phase: phase }),
+        setResults: (pin, round, open) => rpc("admin_set_results", { p_pin: pin, p_round: round, p_open: !!open }),
         setNumber: (pin, id, n) => rpc("admin_set_number", { p_pin: pin, p_id: id, p_number: n }),
         remove: (pin, id) => rpc("admin_remove", { p_pin: pin, p_id: id }),
         reset: (pin, round) => rpc("admin_reset", { p_pin: pin, p_round: round }),
@@ -137,17 +141,16 @@
       return out;
     };
     const fresh = () => ({
-      rounds: { "11/8": { label: "11/8 (일)", phase: "registration" }, "11/6": { label: "11/6 (금)", phase: "registration" } },
+      rounds: { "11/8": { label: "11/8 (일)", results_open: false }, "11/6": { label: "11/6 (금)", results_open: false } },
       people: seedRound("11/8", 9, 9, "0100000").concat(seedRound("11/6", 3, 3, "0100000").map((p, i) => (i === 0 ? p : Object.assign(p, { phone: "0109999" + p.phone.slice(7), name: p.name + "B" })))),
       session: null, notes: {}, picks: {}, surveys: {}, seq: 1,
     });
     const load = () => { try { return JSON.parse(localStorage.getItem(KEY)) || fresh(); } catch (e) { return fresh(); } };
     const save = (s) => localStorage.setItem(KEY, JSON.stringify(s));
     const op = async (fn) => { await new Promise((r) => setTimeout(r, 50)); const s = load(); const r = fn(s); save(s); return r; };
-    const fail = (m) => { throw new Error(m); };
+    const fail = (m, detail) => { throw new Error(detail ? m + " :: " + detail : m); };
     const rng = (seed) => { let x = seed * 9301 + 49297; return () => ((x = (x * 9301 + 49297) % 233280) / 233280); };
     const me = (s) => s.people.find((x) => x.id === s.session) || fail("not_authenticated");
-    const phaseOf = (s, u) => s.rounds[u.round].phase;
     const card = (p) => ({ id: p.id, number: p.number, gender: p.gender, name: p.name, age_label: p.age_label, school: p.school, mbti: p.mbti, hobby: p.hobby });
     const mine = (s, u) => Object.assign(card(u), { phone: u.phone, round_id: u.round, round_label: s.rounds[u.round].label });
     const checkAdmin = (pin) => { if (pin !== ADMIN_PIN) fail("bad_pin"); };
@@ -188,30 +191,42 @@
       }),
       getMe: () => op((s) => { const u = s.people.find((x) => x.id === s.session); return u ? mine(s, u) : null; }),
       logout: () => op((s) => { s.session = null; }),
-      getPhase: () => op((s) => phaseOf(s, me(s))),
-      getCards: () => op((s) => {
-        const u = me(s);
-        if (phaseOf(s, u) === "registration") return [];
-        return s.people.filter((x) => x.round === u.round && x.gender !== u.gender).map(card).sort((a, b) => a.number - b.number);
-      }),
+      getStatus: () => op((s) => ({ results_open: !!s.rounds[me(s).round].results_open })),
       getNotes: () => op((s) => s.notes[me(s).id] || {}),
-      saveNote: (targetId, memo, mark) => op((s) => {
+      saveNote: (slot, memo, mark) => op((s) => {
         const u = me(s);
-        if (phaseOf(s, u) === "registration") fail("cards_closed");
-        (s.notes[u.id] = s.notes[u.id] || {})[targetId] = { memo, mark };
+        if (!(slot >= 1 && slot <= 30)) fail("invalid_slot");
+        (s.notes[u.id] = s.notes[u.id] || {})[slot] = { memo, mark };
       }),
-      getMyPicks: () => op((s) => { const u = me(s); return { picks: s.picks[u.id] || [], submitted: !!s.surveys[u.id], answers: s.surveys[u.id] || {} }; }),
-      submitPicks: (ids, survey) => op((s) => {
+      getMyPicks: () => op((s) => {
         const u = me(s);
-        if (phaseOf(s, u) !== "selection") fail("selection_closed");
+        const picks = (s.picks[u.id] || []).map((id) => s.people.find((x) => x.id === id)).filter(Boolean).map((t) => ({ number: t.number, name: t.name }));
+        return { picks, submitted: !!s.surveys[u.id], answers: s.surveys[u.id] || {} };
+      }),
+      // 번호 또는 이름을 같은 회차의 이성 참가자로 찾는다
+      submitPicks: (inputs, survey) => op((s) => {
+        const u = me(s);
+        if (s.rounds[u.round].results_open) fail("result_published");
+        const pool = s.people.filter((x) => x.round === u.round && x.gender !== u.gender);
+        const ids = [];
+        (inputs || []).forEach((raw) => {
+          const x = String(raw || "").trim();
+          if (!x) return;
+          let hits;
+          if (/^\d{1,3}$/.test(x)) hits = pool.filter((p) => p.number === parseInt(x, 10));
+          else { const norm = (v) => String(v).replace(/\s+/g, "").toLowerCase(); hits = pool.filter((p) => norm(p.name) === norm(x)); if (hits.length > 1) fail("ambiguous_name", x); }
+          if (!hits.length) fail("not_found", x);
+          if (ids.includes(hits[0].id)) fail("duplicate_pick", x);
+          ids.push(hits[0].id);
+        });
         if (ids.length > MAX_PICKS) fail("too_many");
-        if (new Set(ids).size !== ids.length || ids.some((id) => { const t = s.people.find((x) => x.id === id); return !t || t.round !== u.round || t.gender === u.gender; })) fail("invalid_target");
-        s.picks[u.id] = ids.slice();
+        s.picks[u.id] = ids;
         s.surveys[u.id] = survey || {};
+        return { picks: ids.map((id) => { const t = s.people.find((p) => p.id === id); return { number: t.number, name: t.name }; }) };
       }),
       getResult: () => op((s) => {
         const u = me(s);
-        if (phaseOf(s, u) !== "result") fail("not_ready");
+        if (!s.rounds[u.round].results_open) fail("not_ready");
         ensureSamples(s, u.round);
         return (s.picks[u.id] || []).map((tid, i) => {
           const t = s.people.find((x) => x.id === tid);
@@ -222,27 +237,27 @@
       admin: {
         rounds: (pin) => op((s) => {
           checkAdmin(pin);
-          return Object.keys(s.rounds).sort().map((id) => ({ id, label: s.rounds[id].label, phase: s.rounds[id].phase, count: s.people.filter((p) => p.round === id).length }));
+          return Object.keys(s.rounds).sort().map((id) => ({ id, label: s.rounds[id].label, results_open: !!s.rounds[id].results_open, count: s.people.filter((p) => p.round === id).length }));
         }),
         dashboard: (pin, round) => op((s) => {
           checkAdmin(pin);
           const r = s.rounds[round];
-          if (r && ["selection", "result"].includes(r.phase)) ensureSamples(s, round);
+          if (r) ensureSamples(s, round);   // 체험 모드: 로그인하지 않은 가짜 참가자는 선택·설문을 자동으로 낸다
           const here = s.people.filter((p) => p.round === round);
           const matches = [];
           here.filter((p) => p.gender === "M").forEach((m) => (s.picks[m.id] || []).forEach((tid) => {
             if ((s.picks[tid] || []).includes(m.id)) { const f = s.people.find((x) => x.id === tid); matches.push({ m_number: m.number, m_name: m.name, f_number: f.number, f_name: f.name }); }
           }));
           return {
-            round: r ? { id: round, label: r.label, phase: r.phase } : null,
-            phase: r ? r.phase : "registration",
+            round: r ? { id: round, label: r.label, results_open: !!r.results_open } : null,
+            results_open: r ? !!r.results_open : false,
             participants: here.map((p) => ({ id: p.id, number: p.number, gender: p.gender, name: p.name, phone: p.phone, age_label: p.age_label, school: p.school, mbti: p.mbti, hobby: p.hobby, submitted: !!s.surveys[p.id] }))
               .sort((a, b) => (a.gender === b.gender ? a.number - b.number : a.gender === "M" ? -1 : 1)),
             matches,
             surveys: here.filter((p) => s.surveys[p.id]).map((p) => ({ gender: p.gender, answers: s.surveys[p.id] })),
           };
         }),
-        setPhase: (pin, round, phase) => op((s) => { checkAdmin(pin); if (s.rounds[round]) s.rounds[round].phase = phase; }),
+        setResults: (pin, round, open) => op((s) => { checkAdmin(pin); if (s.rounds[round]) s.rounds[round].results_open = !!open; }),
         setNumber: (pin, id, n) => op((s) => {
           checkAdmin(pin);
           const p = s.people.find((x) => x.id === id);
@@ -261,13 +276,13 @@
           s.people = s.people.filter((p) => p.round !== round);
           gone.forEach((id) => { delete s.picks[id]; delete s.surveys[id]; delete s.notes[id]; });
           if (gone.includes(s.session)) s.session = null;
-          if (s.rounds[round]) s.rounds[round].phase = "registration";
+          if (s.rounds[round]) s.rounds[round].results_open = false;
         }),
         import: (pin, round, label, rows, prune) => op((s) => {
           checkAdmin(pin);
           if (!String(round || "").trim()) fail("round_required");
           round = String(round).trim();
-          if (!s.rounds[round]) s.rounds[round] = { label: label || round, phase: "registration" };
+          if (!s.rounds[round]) s.rounds[round] = { label: label || round, results_open: false };
           else s.rounds[round].label = label || s.rounds[round].label;
           let ins = 0, upd = 0, skipped = 0, pruned = 0;
           const seen = new Set();
@@ -301,5 +316,5 @@
   }
 
   window.api = isDemo ? demoApi() : liveApi();
-  window.RN = { SURVEY, MAX_PICKS, friendly, digits, normPhone, fmtPhone, splitSchool, splitHobby };
+  window.RN = { SURVEY, MAX_PICKS, MEMO_SLOTS, friendly, digits, normPhone, fmtPhone, splitSchool, splitHobby };
 })();

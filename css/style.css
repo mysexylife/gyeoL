@@ -461,3 +461,48 @@ details.panel[open] > summary { margin-bottom: 4px; }
 @media (max-width: 420px) { .pph { font-size: 12px; } .phead, .pmain { gap: 6px; } }
 .pact label { white-space: nowrap; }
 .pact input.numin { width: 76px; flex: none; }
+
+/* ───── 탭 설명 ───── */
+.howto { border-left: 2px solid var(--accent); padding: 2px 0 2px 12px; display: grid; gap: 3px; }
+.howto b { color: var(--brand); font-size: 13px; font-weight: 700; letter-spacing: .02em; }
+.howto p { margin: 0; font-size: 13px; line-height: 1.65; color: var(--muted); }
+.howto p b { color: var(--ink); font-size: inherit; letter-spacing: 0; }
+
+/* ───── 내 프로필 카드 ───── */
+.idcard { position: relative; overflow: hidden; isolation: isolate; background: var(--surface); border: 1px solid var(--line); border-radius: 22px; padding: 0 0 20px; box-shadow: var(--shadow); }
+.idcard::after { content: ""; position: absolute; inset: 7px; border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent); border-radius: 16px; pointer-events: none; }
+.id-thread { height: 18px; background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='16' viewBox='0 0 64 16'%3E%3Cpath d='M0 8C10 0 22 16 32 8S54 0 64 8' fill='none' stroke='%23d4604f' stroke-width='2.2' stroke-linecap='round'/%3E%3C/svg%3E") repeat-x left center / 64px 16px; margin-top: 4px; }
+.id-top { display: flex; justify-content: space-between; align-items: baseline; padding: 12px 26px 0; }
+.id-brand { font: 300 22px/1 "Jost", sans-serif; color: var(--brand); letter-spacing: -.02em; }
+.id-round { font: 500 12px/1 var(--sans); color: var(--muted); letter-spacing: .06em; }
+.id-no { display: flex; align-items: baseline; gap: 6px; padding: 10px 26px 0; color: var(--accent); }
+.id-g, .id-u { font: 500 21px/1 var(--sans); }
+.id-n { font: 300 92px/.9 "Jost", sans-serif; letter-spacing: -.04em; font-variant-numeric: tabular-nums; }
+.id-name { font: 500 28px/1.25 var(--sans); letter-spacing: -.01em; padding: 6px 26px 0; }
+.id-grid { margin: 18px 20px 0; display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; position: relative; z-index: 1; }
+.cell { background: var(--surface); padding: 12px 14px 13px; display: grid; gap: 5px; min-width: 0; align-content: start; }
+.cell.wide { grid-column: 1 / -1; }
+.cell dt { font: 500 11px/1 var(--sans); letter-spacing: .12em; color: var(--muted); }
+.cell dd { margin: 0; font: 500 17px/1.4 var(--sans); overflow-wrap: anywhere; }
+.cell .nil { color: var(--muted); opacity: .5; }
+.cell .chips { gap: 6px; }
+.id-foot { text-align: center; font: 400 10px/1 "Jost", sans-serif; letter-spacing: .32em; color: var(--muted); margin-top: 18px; position: relative; z-index: 1; }
+.id-mark { position: absolute; right: -10px; bottom: 0; font: 300 130px/1 "Jost", sans-serif; letter-spacing: -.04em; color: var(--accent); opacity: .07; transform: rotate(-8deg); pointer-events: none; z-index: -1; }
+
+/* ───── 메모장 ───── */
+.memos { display: grid; gap: 10px; }
+.mrow { display: grid; grid-template-columns: 46px minmax(0, 1fr); gap: 8px; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 10px 12px 10px 6px; }
+.mnum { display: grid; justify-items: center; align-content: start; gap: 2px; padding-top: 6px; }
+.mnum b { font: 300 34px/1 "Jost", sans-serif; color: var(--accent); }
+.mnum small { font-size: 11px; color: var(--muted); }
+.mbody { display: grid; gap: 4px; min-width: 0; }
+.mbody textarea { min-height: 62px; }
+.hearts.sm { gap: 2px; }
+.hearts.sm button { font-size: 22px; padding: 0 3px; }
+.hearts.sm .lbl { font-size: 12px; margin-left: 6px; }
+
+/* ───── 최종 선택 입력 ───── */
+.pkfield { display: grid; grid-template-columns: 58px minmax(0, 1fr); align-items: center; gap: 10px; }
+.pkfield label { font-weight: 700; font-size: 14px; color: var(--brand); }
+.resultbar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.resultbar .btn { margin-left: auto; }

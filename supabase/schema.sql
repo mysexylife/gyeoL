@@ -1,16 +1,22 @@
--- gyeoL 로테이션 소개팅 · Supabase 스키마 (v3: 회차별 운영 + 연락처 로그인 + 구글시트 명단)
+-- gyeoL 로테이션 소개팅 · Supabase 스키마 (v4)
+--   · 회차별 운영, 연락처 로그인, 구글시트 명단
+--   · 최종 선택은 언제든 제출(번호/이름 입력), 매칭 결과 공개는 진행자가 회차별로 한 번에 연다
 -- Supabase 대시보드 > SQL Editor 에 통째로 붙여넣고 Run 하세요. (여러 번 실행해도 안전합니다)
 -- 실행 전에 아래 'CHANGE-ME-1234' 진행자 비밀번호를 바꾸세요.
 --
--- ※ 이전 버전(v1 profiles / v2 participants 단일 회차)을 이미 실행했다면, 먼저 아래 두 줄의 주석을 풀어 정리하세요.
+-- ※ v1(profiles / Supabase Auth) 을 실행했다면 먼저 아래 한 줄의 주석을 풀어 정리하세요.
 -- drop table if exists public.picks, public.notes, public.surveys, public.sessions, public.participants, public.profiles cascade;
--- alter table public.app_settings drop column if exists phase;
 
--- 이전 버전의 함수 정리 (인자가 달라진 것들)
+-- 이전 버전의 함수 정리 (인자가 달라졌거나 없어진 것들)
 drop function if exists public.login(text);
 drop function if exists public.get_phase();
+drop function if exists public.get_phase(uuid);
+drop function if exists public.get_cards(uuid);
+drop function if exists public.save_note(uuid, uuid, text, int);
+drop function if exists public.submit_picks(uuid, uuid[], jsonb);
 drop function if exists public.admin_dashboard(text);
 drop function if exists public.admin_set_phase(text, text);
+drop function if exists public.admin_set_phase(text, text, text);
 drop function if exists public.admin_reset(text);
 drop function if exists public.admin_import(text, jsonb, boolean);
 
@@ -24,14 +30,15 @@ create table if not exists public.app_settings (
 insert into public.app_settings (id, admin_pin) values (1, 'CHANGE-ME-1234')
 on conflict (id) do nothing;
 
--- 회차: 진행 단계(phase)는 회차마다 따로 가진다.
+-- 회차: 매칭 결과를 열었는지(results_open)를 회차마다 따로 가진다.
 create table if not exists public.rounds (
-  id         text primary key,                          -- 예: 11/8
-  label      text not null,                             -- 예: 11/8 (일)
-  phase      text not null default 'registration'
-             check (phase in ('registration','rotation','selection','result')),
-  created_at timestamptz not null default now()
+  id           text primary key,                        -- 예: 11/8
+  label        text not null,                           -- 예: 11/8 (일)
+  results_open boolean not null default false,
+  created_at   timestamptz not null default now()
 );
+alter table public.rounds add column if not exists results_open boolean not null default false;
+alter table public.rounds drop column if exists phase;   -- v3 까지 쓰던 진행 단계
 
 -- 참가자 = (회차, 사람). 두 회차를 신청한 사람은 회차마다 한 줄씩 가진다.
 create table if not exists public.participants (
@@ -59,13 +66,20 @@ create table if not exists public.sessions (
   created_at     timestamptz not null default now()
 );
 
+-- 메모장: 상대 참가자와 연결하지 않는 단순 기억용 메모. slot = 이성 번호(1~9)
+do $$ begin
+  if exists (select 1 from information_schema.columns
+             where table_schema = 'public' and table_name = 'notes' and column_name = 'target_id') then
+    drop table public.notes;                              -- v3 의 옛 형식
+  end if;
+end $$;
 create table if not exists public.notes (
   participant_id uuid not null references public.participants(id) on delete cascade,
-  target_id      uuid not null references public.participants(id) on delete cascade,
+  slot           int  not null check (slot between 1 and 30),
   memo           text not null default '',
   mark           int  not null default 0 check (mark between 0 and 3),
   updated_at     timestamptz not null default now(),
-  primary key (participant_id, target_id)
+  primary key (participant_id, slot)
 );
 
 create table if not exists public.picks (
@@ -161,28 +175,14 @@ begin
   return public._card_json(pr, true);
 end $$;
 
--- 내가 속한 회차의 진행 단계
-create or replace function public.get_phase(p_token uuid)
-returns text language plpgsql stable security definer set search_path = public as $$
-declare ph text;
-begin
-  select r.phase into ph from public.participants p join public.rounds r on r.id = p.round_id
-   where p.id = public._me(p_token);
-  return ph;
-end $$;
-
--- 로테이션이 시작된 뒤에만, 같은 회차의 이성 참가자 카드(연락처 제외)를 돌려준다.
-create or replace function public.get_cards(p_token uuid)
+-- 내 회차에서 매칭 결과가 열렸는지
+create or replace function public.get_status(p_token uuid)
 returns jsonb language plpgsql stable security definer set search_path = public as $$
-declare me public.participants; ph text;
+declare ro boolean;
 begin
-  select * into me from public.participants where id = public._me(p_token);
-  select phase into ph from public.rounds where id = me.round_id;
-  if ph = 'registration' then return '[]'::jsonb; end if;
-  return (
-    select coalesce(jsonb_agg(public._card_json(p) order by p.number), '[]'::jsonb)
-    from public.participants p where p.round_id = me.round_id and p.gender <> me.gender
-  );
+  select r.results_open into ro from public.participants p join public.rounds r on r.id = p.round_id
+   where p.id = public._me(p_token);
+  return jsonb_build_object('results_open', coalesce(ro, false));
 end $$;
 
 create or replace function public.get_notes(p_token uuid)
@@ -190,57 +190,71 @@ returns jsonb language plpgsql stable security definer set search_path = public 
 declare pid uuid := public._me(p_token);
 begin
   return coalesce((
-    select jsonb_object_agg(target_id::text, jsonb_build_object('memo', memo, 'mark', mark))
+    select jsonb_object_agg(slot::text, jsonb_build_object('memo', memo, 'mark', mark))
     from public.notes where participant_id = pid), '{}'::jsonb);
 end $$;
 
-create or replace function public.save_note(p_token uuid, p_target uuid, p_memo text, p_mark int)
+create or replace function public.save_note(p_token uuid, p_slot int, p_memo text, p_mark int)
 returns void language plpgsql security definer set search_path = public as $$
-declare me public.participants; ph text;
+declare pid uuid := public._me(p_token);
 begin
-  select * into me from public.participants where id = public._me(p_token);
-  select phase into ph from public.rounds where id = me.round_id;
-  if ph = 'registration' then raise exception 'cards_closed'; end if;
-  if not exists (select 1 from public.participants
-                 where id = p_target and round_id = me.round_id and gender <> me.gender) then
-    raise exception 'invalid_target';
-  end if;
-  insert into public.notes (participant_id, target_id, memo, mark)
-  values (me.id, p_target, left(coalesce(p_memo, ''), 2000), least(3, greatest(0, coalesce(p_mark, 0))))
-  on conflict (participant_id, target_id)
+  if p_slot is null or p_slot < 1 or p_slot > 30 then raise exception 'invalid_slot'; end if;
+  insert into public.notes (participant_id, slot, memo, mark)
+  values (pid, p_slot, left(coalesce(p_memo, ''), 2000), least(3, greatest(0, coalesce(p_mark, 0))))
+  on conflict (participant_id, slot)
   do update set memo = excluded.memo, mark = excluded.mark, updated_at = now();
 end $$;
 
--- 최종 선택 + 설문을 한 번에 저장한다. 결과 발표 전까지 다시 제출하면 덮어쓴다.
-create or replace function public.submit_picks(p_token uuid, p_targets uuid[], p_survey jsonb)
-returns void language plpgsql security definer set search_path = public as $$
+-- 최종 선택 + 설문 제출. 결과가 열리기 전에는 언제든 다시 제출(덮어쓰기)할 수 있다.
+-- p_inputs: 이성 번호(예: '3') 또는 이름(예: '지은') 최대 3개. 같은 회차의 이성 참가자로 찾아 저장한다.
+-- 반환: {picks:[{number,name}]}  (참가자가 오타를 확인할 수 있게)
+create or replace function public.submit_picks(p_token uuid, p_inputs text[], p_survey jsonb)
+returns jsonb language plpgsql security definer set search_path = public as $$
 declare
-  me public.participants; ph text; mx int;
-  cnt int := coalesce(array_length(p_targets, 1), 0);
+  me public.participants; mx int; ro boolean;
+  ids uuid[] := '{}'; x text; t uuid; k int;
 begin
   select * into me from public.participants where id = public._me(p_token);
-  select phase into ph from public.rounds where id = me.round_id;
+  select results_open into ro from public.rounds where id = me.round_id;
+  if ro then raise exception 'result_published'; end if;
   select max_picks into mx from public.app_settings where id = 1;
-  if ph <> 'selection' then raise exception 'selection_closed'; end if;
-  if cnt > mx then raise exception 'too_many'; end if;
-  if cnt > 0 then
-    if (select count(distinct x) from unnest(p_targets) x) <> cnt then raise exception 'invalid_target'; end if;
-    if exists (
-      select 1 from unnest(p_targets) x
-      where not exists (select 1 from public.participants q
-                        where q.id = x and q.round_id = me.round_id and q.gender <> me.gender)
-    ) then raise exception 'invalid_target'; end if;
-  end if;
+
+  foreach x in array coalesce(p_inputs, '{}') loop
+    x := btrim(coalesce(x, ''));
+    if x = '' then continue; end if;
+    t := null;
+    if x ~ '^\d{1,3}$' then
+      select id into t from public.participants
+       where round_id = me.round_id and gender <> me.gender and number = x::int;
+      if t is null then raise exception 'not_found' using detail = x; end if;
+    else
+      select count(*) into k from public.participants
+       where round_id = me.round_id and gender <> me.gender
+         and lower(replace(name, ' ', '')) = lower(replace(x, ' ', ''));
+      if k = 0 then raise exception 'not_found' using detail = x; end if;
+      if k > 1 then raise exception 'ambiguous_name' using detail = x; end if;
+      select id into t from public.participants
+       where round_id = me.round_id and gender <> me.gender
+         and lower(replace(name, ' ', '')) = lower(replace(x, ' ', ''));
+    end if;
+    if t = any(ids) then raise exception 'duplicate_pick' using detail = x; end if;
+    ids := ids || t;
+  end loop;
+  if coalesce(cardinality(ids), 0) > mx then raise exception 'too_many'; end if;
 
   delete from public.picks where participant_id = me.id;
-  if cnt > 0 then
+  if cardinality(ids) > 0 then
     insert into public.picks (participant_id, target_id, rank)
-    select me.id, t.x, t.ord::int from unnest(p_targets) with ordinality as t(x, ord);
+    select me.id, u.id, u.ord::int from unnest(ids) with ordinality as u(id, ord);
   end if;
 
   insert into public.surveys (participant_id, answers)
   values (me.id, coalesce(p_survey, '{}'::jsonb))
   on conflict (participant_id) do update set answers = excluded.answers, submitted_at = now();
+
+  return jsonb_build_object('picks', coalesce((
+    select jsonb_agg(jsonb_build_object('number', p.number, 'name', p.name) order by u.ord)
+    from unnest(ids) with ordinality as u(id, ord) join public.participants p on p.id = u.id), '[]'::jsonb));
 end $$;
 
 create or replace function public.get_my_picks(p_token uuid)
@@ -248,20 +262,23 @@ returns jsonb language plpgsql stable security definer set search_path = public 
 declare pid uuid := public._me(p_token);
 begin
   return jsonb_build_object(
-    'picks', (select coalesce(jsonb_agg(target_id order by rank), '[]'::jsonb) from public.picks where participant_id = pid),
+    'picks', coalesce((
+      select jsonb_agg(jsonb_build_object('number', p.number, 'name', p.name) order by pk.rank)
+      from public.picks pk join public.participants p on p.id = pk.target_id
+      where pk.participant_id = pid), '[]'::jsonb),
     'submitted', exists (select 1 from public.surveys where participant_id = pid),
     'answers', coalesce((select answers from public.surveys where participant_id = pid), '{}'::jsonb)
   );
 end $$;
 
--- 결과 발표 단계에서만 동작. 서로 선택한 경우에만 상대 연락처가 포함된다.
+-- 진행자가 결과를 연 뒤에만 동작. 서로 선택한 경우에만 상대 연락처가 포함된다.
 create or replace function public.get_result(p_token uuid)
 returns jsonb language plpgsql stable security definer set search_path = public as $$
-declare me public.participants; ph text;
+declare me public.participants; ro boolean;
 begin
   select * into me from public.participants where id = public._me(p_token);
-  select phase into ph from public.rounds where id = me.round_id;
-  if ph <> 'result' then raise exception 'not_ready'; end if;
+  select results_open into ro from public.rounds where id = me.round_id;
+  if not coalesce(ro, false) then raise exception 'not_ready'; end if;
   return (
     select coalesce(jsonb_agg(s.x order by (s.x->>'rank')::int), '[]'::jsonb) from (
       select jsonb_build_object(
@@ -288,14 +305,14 @@ begin
   end if;
 end $$;
 
--- 회차 목록 (진행 단계와 인원 포함)
+-- 회차 목록 (결과 공개 여부와 인원 포함)
 create or replace function public.admin_rounds(p_pin text)
 returns jsonb language plpgsql security definer set search_path = public as $$
 begin
   perform public._check_admin(p_pin);
   return coalesce((
     select jsonb_agg(jsonb_build_object(
-      'id', r.id, 'label', r.label, 'phase', r.phase,
+      'id', r.id, 'label', r.label, 'results_open', r.results_open,
       'count', (select count(*) from public.participants p where p.round_id = r.id)) order by r.id)
     from public.rounds r), '[]'::jsonb);
 end $$;
@@ -306,8 +323,8 @@ returns jsonb language plpgsql security definer set search_path = public as $$
 begin
   perform public._check_admin(p_pin);
   return jsonb_build_object(
-    'round', (select jsonb_build_object('id', id, 'label', label, 'phase', phase) from public.rounds where id = p_round),
-    'phase', (select phase from public.rounds where id = p_round),
+    'round', (select jsonb_build_object('id', id, 'label', label, 'results_open', results_open) from public.rounds where id = p_round),
+    'results_open', coalesce((select results_open from public.rounds where id = p_round), false),
     'participants', (
       select coalesce(jsonb_agg(jsonb_build_object(
         'id', p.id, 'number', p.number, 'gender', p.gender, 'name', p.name, 'phone', p.phone,
@@ -329,12 +346,12 @@ begin
   );
 end $$;
 
-create or replace function public.admin_set_phase(p_pin text, p_round text, p_phase text)
+-- 매칭 결과 공개 / 공개 취소 (회차별)
+create or replace function public.admin_set_results(p_pin text, p_round text, p_open boolean)
 returns void language plpgsql security definer set search_path = public as $$
 begin
   perform public._check_admin(p_pin);
-  if p_phase not in ('registration','rotation','selection','result') then raise exception 'invalid_phase'; end if;
-  update public.rounds set phase = p_phase where id = p_round;
+  update public.rounds set results_open = coalesce(p_open, false) where id = p_round;
 end $$;
 
 create or replace function public.admin_set_number(p_pin text, p_id uuid, p_number int)
@@ -357,13 +374,13 @@ begin
   delete from public.participants where id = p_id;   -- 메모·선택·설문·로그인은 연쇄 삭제
 end $$;
 
--- 한 회차를 비우고 '준비' 단계로 되돌린다.
+-- 한 회차를 비우고 결과를 다시 닫는다.
 create or replace function public.admin_reset(p_pin text, p_round text)
 returns void language plpgsql security definer set search_path = public as $$
 begin
   perform public._check_admin(p_pin);
   delete from public.participants where round_id = p_round;
-  update public.rounds set phase = 'registration' where id = p_round;
+  update public.rounds set results_open = false where id = p_round;
 end $$;
 
 -- 명단 가져오기. 한 회차 안에서 연락처가 같으면 갱신, 없으면 추가한다. (시트가 바뀌면 다시 가져오면 된다)
