@@ -1,0 +1,456 @@
+/* 참가자 화면 */
+(() => {
+  const api = window.api;
+  const { SURVEY, MAX_PICKS, friendly, digits, fmtPhone, splitSchool, splitHobby } = window.RN;
+  const $app = document.getElementById("app");
+  const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const PHASES = { registration: "입장 대기", rotation: "로테이션 진행 중", selection: "최종 선택", result: "결과 발표" };
+  const TOPICS = window.TOPICS;
+  const svg = (inner) => `<svg viewBox="0 0 24 24" aria-hidden="true">${inner}</svg>`;
+  const ICON = {
+    cards: svg('<rect x="3.5" y="6.5" width="11" height="13.5" rx="2" transform="rotate(-8 9 13)"/><rect x="9.5" y="4" width="11" height="13.5" rx="2" transform="rotate(7 15 11)"/><path d="M15 12.6s-2.6-1.6-2.6-3.2a1.4 1.4 0 0 1 2.6-.7 1.4 1.4 0 0 1 2.6.7c0 1.6-2.6 3.2-2.6 3.2z"/>'),
+    talk: svg('<path d="M5.5 5h13A2 2 0 0 1 20.5 7v8a2 2 0 0 1-2 2H11l-4.5 3.5V17h-1A2 2 0 0 1 3.5 15V7a2 2 0 0 1 2-2z"/><path d="M10.1 9.4a1.9 1.9 0 1 1 2.6 1.8c-.6.3-.8.6-.8 1.3"/><circle cx="11.9" cy="14.2" r=".5" fill="currentColor"/>'),
+    mine: svg('<rect x="3.5" y="5" width="17" height="14" rx="2.5"/><circle cx="9" cy="10.8" r="2"/><path d="M5.8 16.2c.6-1.6 1.8-2.4 3.2-2.4s2.6.8 3.2 2.4"/><path d="M14.5 10h3.5M14.5 13h2.5"/>'),
+    pick: svg('<path d="M12 20s-7.5-4.6-7.5-10A4.2 4.2 0 0 1 12 7.6 4.2 4.2 0 0 1 19.5 10c0 5.4-7.5 10-7.5 10z"/><path d="M9.3 11.6l2 2 3.6-3.8"/>'),
+    done: svg('<path d="M12 20s-7.5-4.6-7.5-10A4.2 4.2 0 0 1 12 7.6 4.2 4.2 0 0 1 19.5 10c0 5.4-7.5 10-7.5 10z" fill="currentColor" fill-opacity=".18"/><path d="M9.3 11.6l2 2 3.6-3.8"/>'),
+  };
+  const META = window.DECK_META;
+  const DECKS = { light: META.light.name, deep: META.deep.name };
+  const pad2 = (n) => String(n + 1).padStart(2, "0");
+  const newDeck = (k) => ({ left: TOPICS[k].map((_, i) => i), current: null, history: [] });
+  const MARK_LABEL = ["", "관심 있음", "많이 끌림", "최고"];
+
+  const S = {
+    ready: false, me: null, choices: null, phase: "registration",
+    cards: [], notes: {}, mine: { picks: [], submitted: false, answers: {} }, result: null,
+    tab: "mine", sheet: null, share: false,
+    draftPicks: null, draftAnswers: {}, editSel: false, busy: false, error: "", draft: null,
+    talk: { deck: "light", lock: false, dealing: false, d: { light: null, deep: null } },
+  };
+
+  /* ───────── 유틸 ───────── */
+  let toastTimer;
+  function toast(msg) {
+    const t = document.getElementById("toast");
+    t.textContent = msg; t.classList.add("show");
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove("show"), 2600);
+  }
+  const hearts = (n) => `<span class="hm" aria-label="${MARK_LABEL[n] || "표시 없음"}">${"♥".repeat(n)}<i>${"♥".repeat(3 - n)}</i></span>`;
+  const cardById = (id) => S.cards.find((c) => c.id === id);
+  const noteOf = (id) => S.notes[id] || { memo: "", mark: 0 };
+  const genderLabel = (g) => (g === "M" ? "남" : "여");
+
+  /* ───────── 데이터 로드 ───────── */
+  async function loadPhaseData() {
+    if (S.phase !== "registration") { S.cards = await api.getCards(); S.notes = await api.getNotes(); }
+    if (S.phase === "selection" || S.phase === "result") {
+      S.mine = await api.getMyPicks();
+      if (!S.draftPicks) { S.draftPicks = [...S.mine.picks]; S.draftAnswers = { ...S.mine.answers }; }
+    }
+    if (S.phase === "result") S.result = await api.getResult();
+  }
+  const defaultTab = () => (S.phase === "selection" || S.phase === "result" ? "pick" : S.phase === "rotation" ? "cards" : "mine");
+  async function refreshAll() {
+    S.me = await api.getMe();
+    if (S.me) { S.phase = await api.getPhase(); await loadPhaseData(); S.tab = defaultTab(); }
+  }
+  async function poll() {
+    if (!S.me) return;
+    try {
+      const p = await api.getPhase();
+      if (p === S.phase) return;
+      S.phase = p;
+      if (S.me) await loadPhaseData();
+      if (S.me) { S.tab = defaultTab(); S.sheet = null; }
+      render();
+      toast("진행 단계가 '" + PHASES[p] + "'(으)로 바뀌었어요.");
+    } catch (e) { /* 일시적인 네트워크 오류는 무시 */ }
+  }
+
+  /* ───────── 뷰: 카드 ───────── */
+  function cardHTML(p, opts = {}) {
+    const [univ, dept] = splitSchool(p.school), hob = splitHobby(p.hobby);
+    return `<article class="pcard ${opts.big ? "big" : ""}">
+      <div class="pc-top"><span class="pc-num">${p.number}</span><span class="pc-unit">번</span>${opts.mine ? `<span class="pc-g">${genderLabel(p.gender)}성 참가자</span>` : ""}</div>
+      <h3 class="pc-name">${esc(p.name)}</h3>
+      ${p.age_label ? `<p class="pc-meta">${esc(p.age_label)}</p>` : ""}
+      ${univ ? `<div class="pc-school"><b>${esc(univ)}</b>${dept ? `<span>${esc(dept)}</span>` : ""}</div>` : ""}
+      ${p.mbti ? `<div class="chips"><span class="chip strong">${esc(p.mbti)}</span></div>` : ""}
+      ${hob.length ? `<div class="pc-hobby"><span>HOBBY</span><div class="chips">${hob.map((h) => `<span class="chip">${esc(h)}</span>`).join("")}</div></div>` : ""}
+    </article>`;
+  }
+
+  /* ───────── 뷰: 입장 ───────── */
+  // 두 회차 이상에 신청한 번호는 어느 회차에 참석하는지 고른다
+  function choiceForm() {
+    return `<section class="panel"><h2>오늘 참석하는 회차를 골라 주세요</h2>
+      <div class="rounds">${S.choices.list.map((c) => `<button class="btn" type="button" data-act="pickround" data-v="${esc(c.round_id)}" ${S.busy ? "disabled" : ""}>${esc(c.label)}</button>`).join("")}</div>
+      ${S.error ? `<p class="err">${esc(S.error)}</p>` : ""}
+      <button class="link" type="button" data-act="backlogin" style="justify-self:start">← 번호 다시 입력</button></section>`;
+  }
+  function authView() {
+    return `<main class="wrap auth-wrap">
+      <section class="hero"><img src="assets/hero.jpg" alt="붉은 실이 두 사람의 그림자 사이를 잇고 있는 모습"></section>
+      <section class="hero-copy"><p class="eyebrow">ROTATION DATING</p>
+        <h1 class="logo-xl">gyeoL</h1>
+        <p class="tagline">결이 맞는 사람을 만나는 곳</p>
+        <ul class="promo"><li><b>말주변 없어도 괜찮아요.</b> 질문 카드가 준비되어 있어 대화가 술술 풀려요.</li>
+          <li>MBTI·연애 스타일 같은 가벼운 질문부터</li>
+          <li>인생 우선순위, 갈등 해결 방식 같은 깊은 대화까지</li></ul></section>
+      ${S.choices ? choiceForm() : `<form id="f-login" class="panel" autocomplete="on">
+        <h2>내 번호로 입장</h2>
+        <div class="field"><label for="l-phone">신청할 때 적은 휴대폰 번호</label>
+          <input id="l-phone" name="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="010-1234-5678" value="${esc((S.draft || {}).phone || "")}" required></div>
+        <p class="note">번호만 입력하면 들어와요. 내 연락처는 <b>서로 최종 선택이 일치했을 때만</b> 상대에게 전달돼요.</p>
+        ${S.error ? `<p class="err">${esc(S.error)}</p>` : ""}
+        <button class="btn" type="submit" ${S.busy ? "disabled" : ""}>${S.busy ? "확인 중…" : "입장하기"}</button>
+        ${api.mode === "demo" ? `<p class="note">체험용 번호: <b>010-0000-1001</b> (남 1번 · 두 회차에 모두 있어 회차 선택이 나와요) · <b>010-0000-2001</b> (여 1번)</p>` : ""}
+      </form>`}
+    </main>`;
+  }
+
+  /* ───────── 뷰: 상대 카드 ───────── */
+  function cardsView() {
+    if (S.phase === "registration") {
+      return `<div class="empty"><span class="big-n">${S.me.number}</span><b>${esc(S.me.name)}님, 입장했어요</b>
+        <p>내 번호는 ${genderLabel(S.me.gender)}성 ${S.me.number}번이에요.<br>진행자가 로테이션을 시작하면<br>이성 참가자의 카드가 여기에 열려요.</p></div>`;
+    }
+    const done = S.cards.filter((c) => noteOf(c.id).mark > 0 || noteOf(c.id).memo).length;
+    return `<div class="sec-title"><h2>오늘 만난 이성 참가자</h2><span>메모 ${done} / ${S.cards.length}</span></div>
+      <p class="note">번호를 눌러 카드를 보고, 대화하면서 한 줄 메모와 ♥ 끌림을 남기세요. 가볍게 적어도 돼요. 내 메모는 나만 볼 수 있어요.</p>
+      <div class="tiles">${S.cards.map((c) => {
+        const n = noteOf(c.id);
+        return `<button class="tile ${n.mark === 3 ? "m3" : ""}" data-act="open" data-id="${c.id}" aria-label="${c.number}번 ${esc(c.name)}">
+          <span class="n">${c.number}</span><span class="nm">${esc(c.name)}</span>${hearts(n.mark)}<span class="mm">${n.memo ? "메모 있음" : ""}</span></button>`;
+      }).join("")}</div>`;
+  }
+
+  function sheetView() {
+    const idx = S.cards.findIndex((c) => c.id === S.sheet);
+    if (idx < 0) return "";
+    const c = S.cards[idx], n = noteOf(c.id);
+    return `<div class="sheet-back" data-act="closesheet"><div class="sheet" role="dialog" aria-label="${c.number}번 카드">
+      <div class="sheet-bar"><button class="link" data-act="closesheet" data-force="1">닫기</button>
+        <span class="sub" style="font-size:13px">${idx + 1} / ${S.cards.length}</span></div>
+      ${cardHTML(c)}
+      <div class="panel">
+        <div class="hearts" role="group" aria-label="마음 표시">${[1, 2, 3].map((i) => `<button type="button" class="${n.mark >= i ? "on" : ""}" data-act="mark" data-v="${i}" aria-label="${MARK_LABEL[i]}">♥</button>`).join("")}<span class="lbl">${MARK_LABEL[n.mark] || "마음 표시"}</span></div>
+        <div class="field"><label for="memo">메모</label><textarea id="memo" data-bind="memo" placeholder="기억하고 싶은 이야기, 첫인상, 다시 묻고 싶은 것">${esc(n.memo)}</textarea><small>입력하면 자동으로 저장돼요. 나만 볼 수 있어요.</small></div>
+      </div>
+      <div class="sheet-nav"><button class="btn ghost" data-act="nav" data-d="-1" ${idx === 0 ? "disabled" : ""}>← 이전</button><span></span><button class="btn ghost" data-act="nav" data-d="1" ${idx === S.cards.length - 1 ? "disabled" : ""}>다음 →</button></div>
+    </div></div>`;
+  }
+
+  /* ───────── 뷰: 내 카드 ───────── */
+  function mineView() {
+    return `<div class="sec-title"><h2>내 카드</h2><span>${esc(S.me.round_label || "")} · ${genderLabel(S.me.gender)}성 · ${S.me.number}번</span></div>
+      ${cardHTML(S.me, { mine: true })}
+      <button class="btn" data-act="share">상대에게 보여주기</button>
+      <p class="note">카드 내용이 다르면 운영진에게 알려 주세요. 내 연락처(${esc(fmtPhone(S.me.phone))})는 서로 최종 선택이 일치했을 때만 상대에게 전달돼요.</p>`;
+  }
+
+  function surveyHTML() {
+    return SURVEY.map((q, qi) => {
+      const val = S.draftAnswers[q.id];
+      const label = `<span class="qno">${String(qi + 1).padStart(2, "0")}</span>${esc(q.label)}${q.required ? "<i>*</i>" : ""}`;
+      if (q.type === "text") {
+        return `<div class="q"><label class="lbl" for="${q.id}">${label}</label><textarea id="${q.id}" data-bind="ans" data-q="${q.id}" placeholder="${esc(q.placeholder || "")}">${esc(val || "")}</textarea></div>`;
+      }
+      if (q.type === "matrix") {
+        return `<div class="q" data-qid="${q.id}"><span class="lbl">${label}</span>${q.rows.map((r) => `<div class="mx-row"><span>${esc(r.label)}</span><div class="opts">${q.options.map((o) => `<button type="button" class="opt ${val && val[r.id] === o ? "on" : ""}" data-act="ansx" data-q="${q.id}" data-r="${r.id}" data-v="${esc(o)}">${esc(o)}</button>`).join("")}</div></div>`).join("")}</div>`;
+      }
+      if (q.type === "multi") {
+        return `<div class="q" data-qid="${q.id}"><span class="lbl">${label}</span><div class="opts" role="group">${q.options.map((o) => `<button type="button" class="opt chk ${Array.isArray(val) && val.includes(o) ? "on" : ""}" data-act="ansm" data-q="${q.id}" data-v="${esc(o)}" aria-pressed="${Array.isArray(val) && val.includes(o)}">${esc(o)}</button>`).join("")}</div></div>`;
+      }
+      const opts = q.type === "scale" ? [1, 2, 3, 4, 5] : q.options;
+      return `<div class="q" data-qid="${q.id}"><span class="lbl">${label}</span>
+        <div class="opts ${q.type}" role="group">${opts.map((o) => `<button type="button" class="opt ${val === o ? "on" : ""}" data-act="ans" data-q="${q.id}" data-v="${esc(o)}">${esc(o)}</button>`).join("")}</div>
+        ${q.low ? `<div class="ends"><span>${esc(q.low)}</span><span>${esc(q.high)}</span></div>` : ""}</div>`;
+    }).join("");
+  }
+
+  function pickView() {
+    if (S.phase === "registration" || S.phase === "rotation") {
+      return `<div class="empty"><b>아직 최종 선택 시간이 아니에요</b><p>로테이션이 모두 끝나고 진행자가 열어 주면<br>여기에서 마음에 든 ${MAX_PICKS}명을 고르고 설문에 답할 수 있어요.</p></div>`;
+    }
+    if (S.phase === "result") return resultView();
+    if (S.mine.submitted && !S.editSel) {
+      const names = S.mine.picks.map((id) => cardById(id)).filter(Boolean);
+      return `<div class="done">제출 완료! 응답이 집계됐어요.</div>
+        <p class="note"><b>매칭 결과는 오늘 중으로 이 사이트(gyeoL)에서 전달드릴 예정이에요.</b> 연락처와 PIN으로 다시 들어오면 결과를 확인할 수 있어요. 서로 선택한 분이 있다면 그때 연락처가 함께 열려요.</p>
+        <div class="panel"><h2>내가 고른 사람</h2>${names.length ? `<div class="rows">${names.map((c, i) => `<div class="row on"><span class="rk">${i + 1}</span><span class="rn">${c.number}</span><span class="rm"><b>${esc(c.name)}</b><small>${esc([c.mbti, splitSchool(c.school)[0]].filter(Boolean).join(" · "))}</small></span><span></span></div>`).join("")}</div>` : `<p class="sub">선택한 사람이 없어요.</p>`}</div>
+        <button class="btn ghost" data-act="editsel">선택·설문 수정하기</button><p class="note">결과 발표 전까지는 언제든 고쳐서 다시 제출할 수 있어요.</p>`;
+    }
+    const picks = S.draftPicks || [];
+    return `<div class="sec-title"><h2>최종 선택</h2><span><b>${picks.length}</b> / ${MAX_PICKS}명</span></div>
+      <p class="note">고른 순서가 <b>1순위, 2순위, 3순위</b>예요. ${MAX_PICKS}명을 다 고르지 않아도 되고, 1명만 고르거나 비워 두셔도 괜찮아요. 서로 선택해 매칭되면 연락처를 공유해 드려요. 고른 순서는 상대에게 알려지지 않아요.</p>
+      <div class="quick"><input id="quick" type="text" placeholder="번호나 이름으로 추가 (예: 3, 지은)" autocomplete="off"><button class="btn sm" data-act="quickadd">추가</button></div>
+      <div class="rows">${S.cards.map((c) => {
+        const i = picks.indexOf(c.id), n = noteOf(c.id);
+        return `<button class="row ${i >= 0 ? "on" : ""}" data-act="pick" data-id="${c.id}" aria-pressed="${i >= 0}">
+          <span class="rk">${i >= 0 ? i + 1 : ""}</span><span class="rn">${c.number}</span>
+          <span class="rm"><b>${esc(c.name)}</b><small>${esc(n.memo ? n.memo : [c.mbti, splitSchool(c.school)[0]].filter(Boolean).join(" · "))}</small></span>${hearts(n.mark)}</button>`;
+      }).join("")}</div>
+      <section class="panel"><h2>참가 후기 설문</h2><p class="sub" style="font-size:13px">익명으로 집계돼요. 최종 선택과 함께 제출됩니다.</p>${surveyHTML()}</section>
+      ${S.error ? `<p class="err">${esc(S.error)}</p>` : ""}
+      <button class="btn" data-act="submit" ${S.busy ? "disabled" : ""}>${S.busy ? "제출 중…" : S.mine.submitted ? "수정 내용 제출" : "선택하고 제출하기"}</button>`;
+  }
+
+  function resultView() {
+    const res = S.result || [];
+    const hits = res.filter((r) => r.mutual).length;
+    return `<div class="sec-title"><h2>결과</h2><span>서로 선택 ${hits}명</span></div>
+      ${res.length === 0 ? `<div class="empty"><b>선택한 사람이 없어요</b><p>다음 모임에서 또 만나요.</p></div>` : ""}
+      ${res.map((r) => r.mutual ? `<article class="res hit">
+          <div class="who"><b>${r.number}번</b><span>${esc(r.name)}</span><span class="badge">서로 선택</span></div>
+          <p>${esc([r.age_label, splitSchool(r.school).filter(Boolean).join(" ")].filter(Boolean).join(" · "))}</p>
+          <div class="phone">${esc(fmtPhone(r.phone))}</div>
+          <div class="acts"><button class="btn sm ghost" data-act="copy" data-v="${esc(r.phone)}">번호 복사</button><a class="btn sm ghost" style="text-decoration:none" href="tel:${esc(r.phone)}">전화 걸기</a></div>
+        </article>` : `<article class="res">
+          <div class="who"><b>${r.number}번</b><span>${esc(r.name)}</span><span class="badge">연결 안 됨</span></div>
+          <p class="gentle">이번에는 서로의 선택이 맞지 않았어요. 만나 주셔서 고마워요.</p></article>`).join("")}
+      ${hits === 0 && res.length ? `<p class="note">연결되지 않아도 괜찮아요. 오늘 만난 시간은 그대로 남아요.</p>` : ""}`;
+  }
+
+  /* ───────── 뷰: 대화 카드 (덱) ───────── */
+  // 카드 앞면(뒤집기 전): 이중 테두리, 마름모 격자, 햇살 메달리온, 붉은 실 하트, 로고
+  function backSVG(label) {
+    const rays = Array.from({ length: 28 }, (_, i) => {
+      const a = (i * 2 * Math.PI) / 28, long = i % 2 === 0, r1 = 38, r2 = long ? 76 : 62;
+      return `M${(150 + r1 * Math.cos(a)).toFixed(1)} ${(172 + r1 * Math.sin(a)).toFixed(1)}L${(150 + r2 * Math.cos(a)).toFixed(1)} ${(172 + r2 * Math.sin(a)).toFixed(1)}`;
+    }).join("");
+    const corner = (t) => `<g transform="${t}"><path d="M26 66C26 44 44 26 66 26" class="s1"/><path d="M26 51C26 38 38 26 51 26" class="s2"/><circle cx="35" cy="35" r="2.4" class="f1"/></g>`;
+    const corners = [corner(""), corner("translate(300 0) scale(-1 1)"), corner("translate(0 400) scale(1 -1)"), corner("translate(300 400) scale(-1 -1)")].join("");
+    return `<svg class="back" viewBox="0 0 300 400" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <defs>
+        <pattern id="lat" width="22" height="22" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><path d="M11 0V22M0 11H22" class="p1"/><circle cx="11" cy="11" r="1.7" class="pf"/></pattern>
+        <linearGradient id="sheen" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".2"/><stop offset=".5" stop-color="#fff" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".14"/></linearGradient>
+      </defs>
+      <rect width="300" height="400" class="g"/>
+      <rect x="8" y="8" width="284" height="384" rx="12" class="s1"/><rect x="15" y="15" width="270" height="370" rx="8" class="s2"/>
+      <rect x="24" y="24" width="252" height="352" fill="url(#lat)"/>
+      ${corners}
+      <ellipse cx="150" cy="196" rx="92" ry="128" class="g s1"/><ellipse cx="150" cy="196" rx="84" ry="120" class="s2"/>
+      <path d="${rays}" class="s2"/>
+      <circle cx="150" cy="172" r="34" class="g s2"/><circle cx="150" cy="172" r="29" class="s2"/>
+      <path d="M150 190C134 178 129 166 138 160C144 156 150 160 150 165C150 160 156 156 162 160C171 166 166 178 150 190Z" class="thread"/>
+      <path d="M150 190C146 198 140 197 141 192C142 188 149 189 151 195C153 201 160 203 166 198" class="thread"/>
+      <text x="150" y="280" text-anchor="middle" class="t-logo">gyeoL</text>
+      <text x="150" y="297" text-anchor="middle" class="t-sub">ROTATION DATING</text>
+      <path d="M150 59l7 9.5-7 9.5-7-9.5z" class="g s1"/><path d="M150 314l7 9.5-7 9.5-7-9.5z" class="g s1"/>
+      <rect x="92" y="341" width="116" height="28" rx="14" class="g s1"/><text x="150" y="360" text-anchor="middle" class="t-label">${esc(label)}</text>
+      <rect width="300" height="400" fill="url(#sheen)"/></svg>`;
+  }
+
+  const deckState = () => (S.talk.d[S.talk.deck] = S.talk.d[S.talk.deck] || newDeck(S.talk.deck));
+  function hintText(st) { return st.current === null ? "맨 위 카드를 눌러 펼쳐 보세요" : "한 번 더 누르면 다음 카드로 넘어가요"; }
+  function talkView() {
+    const d = S.talk.deck, st = deckState(), total = TOPICS[d].length;
+    const hasTop = st.current !== null || st.left.length > 0;
+    const under = Math.min(4, st.current !== null ? st.left.length : st.left.length - 1);
+    const layers = Array.from({ length: Math.max(0, under) }, (_, i) => `<span class="layer l${under - i}"></span>`).join("");
+    const top = `<button class="flip top ${st.current !== null ? "on" : ""} ${S.talk.dealing ? "deal" : ""}" data-act="draw" aria-label="${DECKS[d]} 카드 덱의 맨 위 카드">
+        <span class="fi"><span class="ff">${backSVG(DECKS[d])}</span>
+        <span class="fb"><span class="fb-top"><small>${META[d].tag}</small><em class="no">${st.current !== null ? pad2(st.current) : ""}</em></span><p>${st.current !== null ? esc(TOPICS[d][st.current]) : ""}</p><span class="fb-foot"><i class="wave"></i><b class="gl">gyeo<u>L</u></b></span></span></span></button>`;
+    return `<div class="sec-title"><h2>대화 카드</h2><span id="talkleft">남은 카드 ${st.left.length}장</span></div>
+      <div class="seg" role="tablist">${Object.keys(DECKS).map((k) => `<button type="button" data-act="deck" data-v="${k}" class="${d === k ? "on" : ""}"><i class="dot dot-${k}"></i>${DECKS[k]}</button>`).join("")}</div>
+      <p class="note"><b>말주변 없어도 괜찮아요.</b> 대화가 막힐 때 덱의 맨 위 카드를 눌러 보세요. 질문 카드 한 장이면 대화가 시작돼요.</p>
+      <div class="stackwrap deck-${d}">
+        ${hasTop ? `<div class="stack">${layers}${top}</div><p class="hint" id="talkhint">${hintText(st)}</p>`
+          : `<div class="empty"><b>카드를 모두 펼쳤어요</b><p>${total}장을 한 바퀴 다 돌았어요.<br>다시 섞어서 이어가 보세요.</p></div>`}
+      </div>
+      <button class="btn ghost" data-act="reshuffle">${hasTop ? "덱 다시 섞기" : "다시 섞어서 시작"}</button>
+      ${st.history.length ? `<section class="hist"><h3>지나간 질문 <span>${st.history.length}</span></h3><ol>${st.history.slice(0, 8).map((i) => `<li><em>${pad2(i)}</em>${esc(TOPICS[d][i])}</li>`).join("")}</ol></section>` : ""}`;
+  }
+
+  /* ───────── 렌더 ───────── */
+  function header() {
+    return `<header class="top"><div class="brand">gyeoL</div><div class="top-r">${S.me ? `<span class="pill ph-${S.phase}">${PHASES[S.phase]}</span><button class="link" data-act="logout">나가기</button>` : ""}</div></header>
+      ${api.mode === "demo" ? `<div class="demo-bar">체험 모드 · 이 브라우저에만 저장돼요. 가짜 참가자가 함께 있어요. <a href="admin.html?demo">진행자 화면 (PIN: demo)</a></div>` : ""}`;
+  }
+
+  function render() {
+    const y = window.scrollY;
+    if (!S.ready) { $app.innerHTML = `${header()}<main class="wrap"><div class="empty">불러오는 중…</div></main>`; return; }
+    if (!S.me) { $app.innerHTML = header() + authView(); return; }
+    const body = S.tab === "cards" ? cardsView() : S.tab === "mine" ? mineView() : S.tab === "talk" ? talkView() : pickView();
+    const pickLabel = S.phase === "result" ? "결과" : "최종 선택";
+    $app.innerHTML = `${header()}<main class="wrap">${body}</main>
+      <nav class="tabs" aria-label="메뉴">
+        <button data-act="tab" data-v="cards" class="${S.tab === "cards" ? "on" : ""}"><span class="ico">${ICON.cards}</span>상대 카드</button>
+        <button data-act="tab" data-v="talk" class="${S.tab === "talk" ? "on" : ""}"><span class="ico">${ICON.talk}</span>대화 카드</button>
+        <button data-act="tab" data-v="mine" class="${S.tab === "mine" ? "on" : ""}"><span class="ico">${ICON.mine}</span>내 카드</button>
+        <button data-act="tab" data-v="pick" class="${S.tab === "pick" ? "on" : ""}"><span class="ico">${S.phase === "result" ? ICON.done : ICON.pick}</span>${pickLabel}${S.phase === "selection" && S.draftPicks && S.draftPicks.length ? `<em class="bdg">${S.draftPicks.length}</em>` : ""}</button>
+      </nav>
+      ${S.sheet ? sheetView() : ""}
+      ${S.share ? `<div class="share" data-act="unshare">${cardHTML(S.me, { big: true })}<p class="hint">화면을 누르면 닫혀요</p></div>` : ""}`;
+    window.scrollTo(0, y);
+  }
+
+  /* ───────── 동작 ───────── */
+  const saveTimers = {};
+  function queueSave(id) {
+    clearTimeout(saveTimers[id]);
+    saveTimers[id] = setTimeout(() => flushSave(id), 600);
+  }
+  async function flushSave(id) {
+    clearTimeout(saveTimers[id]); delete saveTimers[id];
+    const n = noteOf(id);
+    try { await api.saveNote(id, n.memo, n.mark); } catch (e) { toast("메모 저장에 실패했어요. 다시 시도해 주세요."); }
+  }
+  function flushAll() { Object.keys(saveTimers).forEach(flushSave); }
+
+  function formData(f) { return Object.fromEntries(new FormData(f).entries()); }
+
+  async function guarded(fn) {
+    if (S.busy) return;
+    S.busy = true; S.error = "";
+    document.querySelectorAll("button[type=submit],[data-act=submit]").forEach((b) => (b.disabled = true));
+    try { await fn(); S.draft = null; } catch (e) { S.error = friendly(e); }
+    S.busy = false; render();
+  }
+
+  const actions = {
+    tab: (t) => { flushAll(); S.draft = null; S.tab = t.dataset.v; S.error = ""; render(); window.scrollTo(0, 0); },
+    open: (t) => { S.sheet = t.dataset.id; render(); },
+    closesheet: (t, e) => { if (e.target !== t && !t.dataset.force) return; flushAll(); S.sheet = null; render(); },
+    nav: (t) => {
+      const i = S.cards.findIndex((c) => c.id === S.sheet) + Number(t.dataset.d);
+      if (S.cards[i]) { flushAll(); S.sheet = S.cards[i].id; render(); document.querySelector(".sheet")?.scrollTo(0, 0); }
+    },
+    mark: (t) => {
+      const id = S.sheet, v = Number(t.dataset.v), n = noteOf(id);
+      S.notes[id] = { memo: n.memo, mark: n.mark === v ? 0 : v };
+      render(); flushSave(id);
+    },
+    deck: (t) => { S.talk.deck = t.dataset.v; render(); },
+    draw: (t) => {
+      if (S.talk.lock) return;
+      const d = S.talk.deck, st = deckState();
+      if (st.current === null) {
+        if (!st.left.length) return;
+        const idx = st.left.splice(Math.floor(Math.random() * st.left.length), 1)[0];
+        st.current = idx;
+        t.querySelector(".fb p").textContent = TOPICS[d][idx];
+        t.querySelector(".fb .no").textContent = pad2(idx);
+        t.classList.add("on");
+        const l = document.getElementById("talkleft"); if (l) l.textContent = "남은 카드 " + st.left.length + "장";
+        const h = document.getElementById("talkhint"); if (h) h.textContent = hintText(st);
+      } else {
+        S.talk.lock = true; t.classList.add("out");
+        setTimeout(() => { st.history.unshift(st.current); st.current = null; S.talk.lock = false; S.talk.dealing = true; render(); S.talk.dealing = false; }, 340);
+      }
+    },
+    reshuffle: () => { S.talk.d[S.talk.deck] = newDeck(S.talk.deck); render(); },
+    share: () => { S.share = true; render(); },
+    unshare: () => { S.share = false; render(); },
+    pickround: (t) => {
+      const phone = S.choices.phone, round = t.dataset.v;
+      guarded(async () => { await finishLogin(await api.login(phone, round)); });
+    },
+    backlogin: () => { S.choices = null; S.error = ""; render(); },
+    logout: async () => { flushAll(); await api.logout(); Object.assign(S, { me: null, choices: null, tab: "mine", cards: [], notes: {}, draftPicks: null, result: null, sheet: null }); render(); },
+    pick: (t) => {
+      const id = t.dataset.id, i = S.draftPicks.indexOf(id);
+      if (i >= 0) S.draftPicks.splice(i, 1);
+      else if (S.draftPicks.length >= MAX_PICKS) return toast("최대 " + MAX_PICKS + "명까지 고를 수 있어요.");
+      else S.draftPicks.push(id);
+      render();
+    },
+    quickadd: () => {
+      const input = document.getElementById("quick"), q = input.value.trim();
+      if (!q) return;
+      let hit = null;
+      if (/^\d+$/.test(q)) hit = S.cards.find((c) => c.number === Number(q));
+      else {
+        const exact = S.cards.filter((c) => c.name === q), part = S.cards.filter((c) => c.name.includes(q));
+        hit = exact.length === 1 ? exact[0] : part.length === 1 ? part[0] : null;
+        if (!hit && part.length > 1) return toast("이름이 여러 명이에요. 번호로 입력해 주세요.");
+      }
+      if (!hit) return toast("'" + q + "'에 해당하는 사람을 찾지 못했어요.");
+      if (S.draftPicks.includes(hit.id)) return toast(hit.number + "번은 이미 골랐어요.");
+      if (S.draftPicks.length >= MAX_PICKS) return toast("최대 " + MAX_PICKS + "명까지 고를 수 있어요.");
+      S.draftPicks.push(hit.id); render(); toast(hit.number + "번 " + hit.name + " 추가");
+    },
+    ans: (t) => {
+      const q = SURVEY.find((x) => x.id === t.dataset.q);
+      const raw = t.dataset.v, v = q.type === "scale" ? Number(raw) : raw;
+      S.draftAnswers[q.id] = v;
+      t.parentElement.querySelectorAll(".opt").forEach((b) => b.classList.toggle("on", b === t));
+    },
+    ansm: (t) => {
+      const id = t.dataset.q, v = t.dataset.v;
+      const cur = (S.draftAnswers[id] = Array.isArray(S.draftAnswers[id]) ? S.draftAnswers[id] : []);
+      const i = cur.indexOf(v);
+      if (i >= 0) cur.splice(i, 1); else cur.push(v);
+      t.classList.toggle("on", i < 0); t.setAttribute("aria-pressed", String(i < 0));
+    },
+    ansx: (t) => {
+      const id = t.dataset.q, cur = (S.draftAnswers[id] = S.draftAnswers[id] && typeof S.draftAnswers[id] === "object" ? S.draftAnswers[id] : {});
+      cur[t.dataset.r] = t.dataset.v;
+      t.parentElement.querySelectorAll(".opt").forEach((b) => b.classList.toggle("on", b === t));
+    },
+    editsel: () => { S.editSel = true; render(); },
+    submit: () => {
+      const filled = (q, v) => (q.type === "multi" ? Array.isArray(v) && v.length > 0 : q.type === "matrix" ? !!v && q.rows.every((r) => v[r.id]) : !(v === undefined || v === ""));
+      const missing = SURVEY.find((q) => q.required && !filled(q, S.draftAnswers[q.id]));
+      if (missing) { toast("설문 " + String(SURVEY.indexOf(missing) + 1).padStart(2, "0") + "번에 답해 주세요."); document.querySelector(`[data-qid="${missing.id}"]`)?.scrollIntoView({ block: "center" }); return; }
+      guarded(async () => {
+        await api.submitPicks(S.draftPicks, S.draftAnswers);
+        S.mine = await api.getMyPicks(); S.editSel = false; window.scrollTo(0, 0);
+        toast("제출했어요.");
+      });
+    },
+    copy: async (t) => {
+      try { await navigator.clipboard.writeText(t.dataset.v); toast("번호를 복사했어요."); }
+      catch (e) { toast("길게 눌러 번호를 복사해 주세요."); }
+    },
+  };
+
+  document.addEventListener("click", (e) => {
+    const t = e.target.closest("[data-act]");
+    if (t && actions[t.dataset.act]) actions[t.dataset.act](t, e);
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && e.target.id === "quick") { e.preventDefault(); actions.quickadd(); }
+    if (e.key === "Escape" && S.sheet) { flushAll(); S.sheet = null; render(); }
+  });
+  document.addEventListener("input", (e) => {
+    const b = e.target.dataset && e.target.dataset.bind;
+    if (b === "memo") { const n = noteOf(S.sheet); S.notes[S.sheet] = { memo: e.target.value, mark: n.mark }; queueSave(S.sheet); }
+    if (b === "ans") S.draftAnswers[e.target.dataset.q] = e.target.value;
+  });
+  window.addEventListener("pagehide", flushAll);
+  document.addEventListener("visibilitychange", () => { if (document.hidden) flushAll(); else poll(); });
+
+  document.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const f = e.target;
+    if (f.id !== "f-login") return;
+    const raw = String(new FormData(f).get("phone") || "");
+    S.draft = { phone: raw };
+    guarded(async () => {
+      const d = digits(raw);
+      if (d.length < 10 || d.length > 13) throw new Error("bad_phone");
+      const r = await api.login(raw);
+      if (r.choices) { S.choices = { phone: raw, list: r.choices }; return; }
+      await finishLogin(r);
+    });
+  });
+
+  async function finishLogin(r) {
+    S.choices = null;
+    S.me = r.me;
+    S.phase = await api.getPhase();
+    S.draftPicks = null;
+    await loadPhaseData();
+    S.tab = defaultTab();
+  }
+
+  (async function boot() {
+    render();
+    try { await refreshAll(); } catch (e) { S.error = friendly(e); }
+    S.ready = true; render();
+    setInterval(poll, 6000);
+  })();
+})();
