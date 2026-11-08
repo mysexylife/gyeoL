@@ -76,14 +76,25 @@
 
   /* ───────────── Supabase ───────────── */
   function liveApi() {
-    const sb = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey, { auth: { persistSession: false, autoRefreshToken: false } });
+    // 외부 라이브러리 없이 Supabase REST(PostgREST)를 직접 호출한다. apikey 헤더만 보내면 새·옛 키 형식 모두 동작한다.
+    const base = String(cfg.supabaseUrl).replace(/\/+$/, "") + "/rest/v1/rpc/";
     const KEY = "rn_token";
     const getTok = () => { try { return localStorage.getItem(KEY); } catch (e) { return null; } };
     const setTok = (t) => { try { if (t) localStorage.setItem(KEY, t); else localStorage.removeItem(KEY); } catch (e) { /* 저장소 사용 불가 */ } };
     const rpc = async (name, args) => {
       if (args && args.p_pin !== undefined) args = Object.assign({}, args, { p_pin: digits(args.p_pin) });
-      const { data, error } = await sb.rpc(name, args || {});
-      if (error) throw new Error(error.message + (error.details ? " :: " + error.details : ""));
+      const res = await fetch(base + name, {
+        method: "POST",
+        headers: { apikey: cfg.supabaseAnonKey, "Content-Type": "application/json" },
+        body: JSON.stringify(args || {}),
+      });
+      const text = await res.text();
+      let data = null;
+      try { data = text ? JSON.parse(text) : null; } catch (e) { data = null; }
+      if (!res.ok) {
+        const msg = (data && data.message) || text || res.statusText || "요청 실패";
+        throw new Error(msg + (data && data.details ? " :: " + data.details : ""));
+      }
       return data;
     };
     const authed = (name, args) => rpc(name, Object.assign({ p_token: getTok() }, args));
