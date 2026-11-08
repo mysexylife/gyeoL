@@ -32,7 +32,7 @@ on conflict (id) do nothing;
 
 -- 회차: 매칭 결과를 열었는지(results_open)를 회차마다 따로 가진다.
 create table if not exists public.rounds (
-  id           text primary key,                        -- 예: 11/8
+  id           text primary key,                        -- 날짜 YYYY-MM-DD (화면에는 11/8 (일) 로 표시)
   label        text not null,                           -- 예: 11/8 (일)
   results_open boolean not null default false,
   created_at   timestamptz not null default now()
@@ -58,6 +58,22 @@ create table if not exists public.participants (
   constraint participants_round_gender_number_key unique (round_id, gender, number) deferrable initially deferred
 );
 create index if not exists participants_phone_idx on public.participants (phone);
+
+-- 회차 id 를 'YYYY-MM-DD' 로 통일한다. (v4 까지는 '11/8' 처럼 연도 없이 저장했다)
+-- 이미 만들어진 회차는 만든 해를 붙여 옮기고, 참가자도 함께 옮긴다. 여러 번 실행해도 안전하다.
+do $$
+declare r record; nid text;
+begin
+  for r in select id, created_at from public.rounds where id ~ '^\d{1,2}/\d{1,2}$' loop
+    nid := to_char(make_date(extract(year from r.created_at)::int, split_part(r.id, '/', 1)::int, split_part(r.id, '/', 2)::int), 'YYYY-MM-DD');
+    insert into public.rounds (id, label, results_open, created_at)
+      select nid, label, results_open, created_at from public.rounds where id = r.id
+      on conflict (id) do nothing;
+    update public.participants set round_id = nid where round_id = r.id;
+    delete from public.rounds where id = r.id;
+  end loop;
+end $$;
+
 
 -- 로그인 상태(브라우저에 저장되는 임의 토큰)
 create table if not exists public.sessions (
@@ -467,6 +483,7 @@ declare
 begin
   perform public._check_admin(p_pin);
   if nullif(trim(p_round), '') is null then raise exception 'round_required'; end if;
+  if trim(p_round) !~ '^\d{4}-\d{2}-\d{2}$' then raise exception 'invalid_round'; end if;
   if jsonb_typeof(p_rows) <> 'array' then raise exception 'invalid_rows'; end if;
 
   insert into public.rounds (id, label) values (trim(p_round), coalesce(nullif(trim(p_label), ''), trim(p_round)))

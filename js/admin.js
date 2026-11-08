@@ -1,15 +1,15 @@
 /* 진행자 화면: 단계 전환, 참가 현황, 매칭, 설문 집계, CSV */
 (() => {
   const api = window.api;
-  const { SURVEY, MAX_PICKS, friendly, splitSchool, fmtPhone, normPhone } = window.RN;
+  const { SURVEY, MAX_PICKS, friendly, splitSchool, fmtPhone, normPhone, roundLabel, roundTag, toRoundId, dateChoices, todayISO } = window.RN;
   const Roster = window.Roster;
   const $app = document.getElementById("app");
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
-  const S = { pin: "", data: null, error: "", confirm: "", busy: false, round: "", rounds: [], open: {}, openPick: {}, pickEdit: {}, onlyBad: false,
+  const S = { pin: "", data: null, error: "", confirm: "", busy: false, round: "", rounds: [], tab: "picks", open: {}, openPick: {}, pickEdit: {}, onlyBad: false,
     add: { open: false, editing: false, round: "", name: "", gender: "", phone: "", number: "", age: "", school: "", mbti: "", hobby: "" },
     imp: { open: true, text: "", fileName: "", table: null, map: {}, date: "", numberedOnly: false, prune: false, done: null, error: "" } };
-  try { S.pin = sessionStorage.getItem("rn_admin_pin") || ""; S.round = sessionStorage.getItem("rn_admin_round") || ""; } catch (e) { /* 저장소 사용 불가 */ }
+  try { S.pin = sessionStorage.getItem("rn_admin_pin") || ""; S.round = sessionStorage.getItem("rn_admin_round") || ""; S.tab = sessionStorage.getItem("rn_admin_tab") || "picks"; } catch (e) { /* 저장소 사용 불가 */ }
 
   let toastTimer;
   function toast(msg) {
@@ -20,10 +20,13 @@
 
   // 회차 목록과, 선택한 회차의 현황을 불러온다. 진행자 화면은 항상 한 회차만 보여준다.
   async function load() {
-    S.rounds = await api.admin.rounds(S.pin);
-    if (!S.rounds.some((r) => r.id === S.round)) S.round = S.rounds.length ? S.rounds[0].id : "";
+    S.rounds = (await api.admin.rounds(S.pin)).sort((a, b) => (a.id < b.id ? 1 : -1));   // 최근 날짜가 앞
+    if (!S.rounds.some((r) => r.id === S.round)) {
+      const ids = S.rounds.map((r) => r.id).sort(), t = todayISO();
+      S.round = ids.includes(t) ? t : ids.find((i) => i > t) || ids[ids.length - 1] || "";
+    }
     S.data = S.round ? await api.admin.dashboard(S.pin, S.round) : { round: null, results_open: false, participants: [], matches: [], surveys: [] };
-    try { sessionStorage.setItem("rn_admin_round", S.round); } catch (e) { /* 무시 */ }
+    try { sessionStorage.setItem("rn_admin_round", S.round); sessionStorage.setItem("rn_admin_tab", S.tab); } catch (e) { /* 무시 */ }
   }
 
   /* ───────── 설문 집계 ───────── */
@@ -85,6 +88,13 @@
         <button class="btn" type="submit">들어가기</button></form></main>`;
   }
 
+  /* ───────── 날짜 드롭다운 (수동 등록·시트 가져오기 공통) ───────── */
+  function dateSelect(id, value, extra) {
+    const counts = Object.fromEntries(S.rounds.map((r) => [r.id, r.count])), t = todayISO();
+    const opts = dateChoices(S.rounds.map((r) => r.id)).map((d) => `<option value="${d}" ${d === value ? "selected" : ""}>${esc(roundLabel(d))}${d === t ? " · 오늘" : ""}${counts[d] != null ? " · " + counts[d] + "명" : ""}</option>`).join("");
+    return `<select id="${id}" ${extra || ""}>${opts}</select>`;
+  }
+
   /* ───────── 참가자 입장 링크 + QR ───────── */
   function entryUrl() {
     const u = new URL(location.href);
@@ -137,8 +147,8 @@
       body = `<div class="mapgrid">${["phone", "name", "gender", "number", "age", "school", "mbti", "hobby", "date"].map(sel).join("")}</div>
         <div class="filters">
           ${dates.length
-            ? `<label class="mp"><span>가져올 회차</span><select id="imp-date">${dates.map((x) => `<option value="${x}" ${im.date === x ? "selected" : ""}>${esc(Roster.dateLabel(data, im.map, x))}</option>`).join("")}</select></label>`
-            : `<label class="mp"><span>회차 이름</span><input type="text" id="imp-round" value="${esc(im.roundName || S.round || "")}" placeholder="예: 11/8"></label>`}
+            ? `<label class="mp"><span>가져올 날짜 (시트)</span><select id="imp-date">${dates.map((x) => `<option value="${x}" ${im.date === x ? "selected" : ""}>${esc(roundLabel(toRoundId(x)))}</option>`).join("")}</select></label>`
+            : `<label class="mp"><span>저장할 날짜</span>${dateSelect("imp-round", im.roundId || S.round || todayISO())}</label>`}
           <label class="ck"><input type="checkbox" id="imp-numbered" ${im.numberedOnly ? "checked" : ""}> 현장 번호가 있는 사람만</label>
           <label class="ck"><input type="checkbox" id="imp-prune" ${im.prune ? "checked" : ""}> 이 회차에서 이번 명단에 없는 기존 참가자는 삭제</label>
         </div>
@@ -148,22 +158,22 @@
         <div class="toolbar"><span class="sub" style="font-size:12.5px">${im.fileName ? esc(im.fileName) : "붙여넣은 내용"} · 이상형·사진·입금·추가요청 열은 읽지 않고 서버로 보내지 않아요.</span>
           <button class="btn" style="width:auto" data-act="imp-run" ${canRun ? "" : "disabled"}>${S.confirm === "imp" ? "삭제가 포함돼요. 한 번 더 눌러 실행" : `${b.rows.length}명 가져오기`}</button></div>`;
     }
-    return `<details class="panel" id="imp-details" ${im.open ? "open" : ""}><summary><h2>명단 가져오기 <span class="sub">구글 시트 응답 → 참가자 카드</span></h2></summary>
-      <p class="note">회차마다 한 번씩 가져오세요(예: 11/6, 11/8). 시트가 바뀌면 같은 방법으로 다시 가져오면 돼요. 같은 회차 안에서 연락처가 같은 사람은 정보만 갱신하고, 메모·선택은 그대로 유지돼요.</p>
+    return `<section class="panel" id="imp-details"><h2>명단 가져오기 <span class="sub">구글 시트 응답 → 참가자</span></h2>
+      <p class="note">날짜마다 한 번씩 가져오세요(예: 11/6, 11/8). 가져온 사람은 그 날짜의 참가자로 저장되어, 직접 추가한 사람과 같은 날짜에 합쳐져요. 시트가 바뀌면 같은 방법으로 다시 가져오면 돼요. 같은 날짜 안에서 연락처가 같은 사람은 정보만 갱신하고, 메모·선택은 그대로 유지돼요.</p>
       <ol class="how"><li>구글 시트에서 <b>파일 → 다운로드 → 쉼표로 구분된 값(.csv)</b>을 받아 올리거나,</li><li>시트 전체를 선택(<b>Ctrl/⌘+A</b>)해 복사한 뒤 아래에 붙여넣으세요.</li></ol>
       <div class="impin"><input type="file" id="imp-file" accept=".csv,.tsv,.txt,text/csv,text/plain" aria-label="CSV 파일 선택">
         <textarea id="imp-text" placeholder="또는 여기에 붙여넣기" rows="3">${esc(im.text)}</textarea>
         <button class="btn sm ghost" data-act="imp-parse">붙여넣은 내용 불러오기</button></div>
       ${im.error ? `<p class="err">${esc(im.error)}</p>` : ""}
       ${im.done ? `<div class="done">가져왔어요 · 추가 ${im.done.inserted}명, 갱신 ${im.done.updated}명${im.done.skipped ? `, 건너뜀 ${im.done.skipped}명` : ""}${im.done.pruned ? `, 삭제 ${im.done.pruned}명` : ""}</div>` : ""}
-      ${body}</details>`;
+      ${body}</section>`;
   }
   function loadImport(text, fileName) {
     const im = S.imp;
     im.error = ""; im.done = null; im.fileName = fileName || ""; im.confirm = false;
     const table = Roster.parseTable(text);
     if (table.length < 2) { im.table = null; im.error = "읽을 수 있는 행이 없어요. 머리글이 있는 시트 전체를 올려 주세요."; return; }
-    im.table = table; im.map = Roster.detect(table[0], table.slice(1)); im.date = ""; im.roundName = ""; im.numberedOnly = false;
+    im.table = table; im.map = Roster.detect(table[0], table.slice(1)); im.date = ""; im.roundId = ""; im.numberedOnly = false;
     const need = ["phone", "name", "gender"].filter((f) => im.map[f] < 0);
     if (need.length) im.error = "일부 열을 자동으로 찾지 못했어요. 아래에서 직접 골라 주세요.";
   }
@@ -171,7 +181,8 @@
   /* ───────── 회차 선택 + 참가자 목록(컴팩트) ───────── */
   function roundBar() {
     if (!S.rounds.length) return "";
-    return `<nav class="roundbar" aria-label="회차">${S.rounds.map((r) => `<button class="rchip ${r.id === S.round ? "on" : ""}" data-act="round" data-v="${esc(r.id)}" aria-pressed="${r.id === S.round}"><b>${esc(r.label)}</b><small>${r.count}명 · ${r.results_open ? "결과 공개" : "진행 중"}</small></button>`).join("")}</nav>`;
+    return `<nav class="roundbar" aria-label="날짜별 회차">${S.rounds.map((r) => { const tag = roundTag(r.id);
+      return `<button class="rchip ${r.id === S.round ? "on" : ""}" data-act="round" data-v="${esc(r.id)}" aria-pressed="${r.id === S.round}"><b>${esc(roundLabel(r.id))} <i class="rtag t-${tag}">${tag}</i></b><small>${r.count}명 · ${r.results_open ? "결과 공개" : "진행 중"}</small></button>`; }).join("")}</nav>`;
   }
   // 한 줄: 번호 · 이름 · 성별 · 연락처 + 펼치기 버튼.  자세한 정보는 펼쳤을 때만 보인다.
   function participantList(ppl) {
@@ -199,10 +210,10 @@
     const a = S.add, hasRound = !!(S.data && S.data.round);
     const f = (id, label, input) => `<label class="mp" for="add-${id}"><span>${label}</span>${input}</label>`;
     const txt = (id, ph, extra) => `<input type="text" id="add-${id}" value="${esc(a[id])}" placeholder="${esc(ph || "")}" autocomplete="off" ${extra || ""}>`;
-    return `<details class="panel" id="add-details" ${a.open ? "open" : ""}><summary><h2>참가자 추가·수정 <span class="sub">시트에 없는 사람을 직접 넣기</span></h2></summary>
-      <p class="note">${a.editing ? "연락처는 그 사람을 구분하는 값이라 바꿀 수 없어요. 연락처를 바꾸려면 이전 사람을 삭제하고 새로 추가하세요." : "추가한 사람은 바로 입장할 수 있어요. 같은 연락처로 다시 추가하면 그 사람의 정보가 수정돼요. 번호를 비우면 같은 성별의 다음 번호가 붙어요."}</p>
+    return `<section class="panel" id="add-details"><h2>${a.editing ? "참가자 정보 수정" : "참가자 직접 추가"} <span class="sub">시트에 없는 사람을 직접 넣기</span></h2>
+      <p class="note">${a.editing ? "연락처는 그 사람을 구분하는 값이라 바꿀 수 없어요. 연락처를 바꾸려면 이전 사람을 삭제하고 새로 추가하세요." : "추가한 사람은 선택한 날짜의 참가자로 들어가고, 시트에서 가져온 사람과 같은 날짜에 합쳐져요. 같은 연락처로 다시 추가하면 정보가 수정돼요. 번호를 비우면 같은 성별의 다음 번호가 붙어요. <b>시트 가져오기를 먼저 하고 나머지를 추가하면</b> 번호가 겹치지 않아요."}</p>
       <form id="f-add" class="addgrid" autocomplete="off">
-        ${hasRound ? "" : f("round", "회차 *", txt("round", "예: 11/8", "required"))}
+        ${f("round", "날짜 *", dateSelect("add-round", a.editing ? S.round : (a.round || S.round || todayISO()), a.editing ? "disabled" : ""))}
         ${f("name", "이름 *", txt("name", "성+이름 (예: 김지은)", "required"))}
         <div class="mp"><span>성별 *</span><div class="seg"><label><input type="radio" name="add-gender" value="M" ${a.gender === "M" ? "checked" : ""}><span>남성</span></label><label><input type="radio" name="add-gender" value="F" ${a.gender === "F" ? "checked" : ""}><span>여성</span></label></div></div>
         ${f("phone", "연락처 *", `<input type="tel" inputmode="tel" id="add-phone" value="${esc(a.phone)}" placeholder="010-1234-5678" required ${a.editing ? "readonly" : ""}>`)}
@@ -212,7 +223,7 @@
         ${f("mbti", "MBTI", txt("mbti", "예: INTP", 'maxlength="4"'))}
         ${f("hobby", "취미", txt("hobby", "예: 러닝, 전시회"))}
         <div class="addact"><button class="btn" type="submit" ${S.busy ? "disabled" : ""}>${a.editing ? "수정 저장" : "참가자 추가"}</button>${a.editing ? `<button class="btn ghost" type="button" data-act="add-cancel">취소</button>` : ""}</div>
-      </form></details>`;
+      </form></section>`;
   }
 
   /* ───────── 최종 선택 현황 + 수동 조정 ───────── */
@@ -242,51 +253,64 @@
       ${rows ? `<div class="plist" role="list"><div class="phead pickhead"><span class="pn">번호</span><span>이름</span><span>성별</span><span>1·2·3순위</span><span></span></div>${rows}</div>` : `<div class="empty"><b>${S.onlyBad ? "확인이 필요한 선택이 없어요" : "아직 참가자가 없어요"}</b></div>`}</section>`;
   }
 
-  function dashView() {
-    const d = S.data, ppl = d.participants;
-    const men = ppl.filter((p) => p.gender === "M"), women = ppl.filter((p) => p.gender === "F");
+  /* ───────── 하단 탭 4개: 최종 선택 현황 · 참가자 현황 · 참가자 추가 · 설문 결과 ───────── */
+  const ico = (inner) => `<svg viewBox="0 0 24 24" aria-hidden="true">${inner}</svg>`;
+  const TABS = [
+    ["picks", "최종 선택", ico('<path d="M12 20s-7.5-4.6-7.5-10A4.2 4.2 0 0 1 12 7.6 4.2 4.2 0 0 1 19.5 10c0 5.4-7.5 10-7.5 10z"/><path d="M9.3 11.6l2 2 3.6-3.8"/>')],
+    ["people", "참가자", ico('<circle cx="9" cy="8.5" r="3"/><path d="M3.5 19c.5-3 2.7-4.8 5.5-4.8s5 1.8 5.5 4.8"/><circle cx="17" cy="9.5" r="2.4"/><path d="M16 14.4c2.6-.2 4.2 1.4 4.5 4.1"/>')],
+    ["add", "참가자 추가", ico('<circle cx="10" cy="8.5" r="3.2"/><path d="M4 19c.5-3.3 2.8-5 6-5s5.5 1.7 6 5"/><path d="M19 8v6M16 11h6"/>')],
+    ["survey", "설문 결과", ico('<path d="M4.5 20V10M10 20V4.5M15.5 20v-7M21 20H3"/>')],
+  ];
+
+  // [최종 선택 현황] 결과 공개 스위치 + 선택 현황·조정 + 매칭 쌍
+  function tabPicks(d, rnd) {
+    const ppl = d.participants, submitted = ppl.filter((p) => p.submitted).length, bad = (d.picks || []).filter((x) => !x.target_id).length;
+    return `<section class="panel"><div class="toolbar"><h2>${esc(roundLabel(rnd.id))} 매칭 결과</h2><button class="btn sm ghost" data-act="refresh">새로고침</button></div>
+        <p class="note">참가자는 <b>언제든</b> 최종 선택과 설문을 제출·수정할 수 있어요. 아래 버튼을 누르면 이 날짜의 <b>매칭 결과(서로 선택한 경우 연락처 포함)가 참가자 화면에 공개</b>되고, 그 뒤에는 선택을 더 바꿀 수 없어요. 공개 전에 '제출' 인원과 <b>확인 필요</b>를 확인하세요. 날짜마다 따로 공개해요.</p>
+        <div class="resultbar"><span class="tag ${d.results_open ? "y" : "n"}">${d.results_open ? "결과 공개 중" : "아직 비공개"}</span><span class="sub" style="font-size:13px">제출 ${submitted} / ${ppl.length}명 · 매칭 ${d.matches.length}쌍${bad ? ` · <b class="badtxt">확인 필요 ${bad}건</b>` : ""}</span>
+          <button class="btn ${d.results_open ? "ghost" : ""}" style="width:auto" data-act="results" ${S.busy ? "disabled" : ""}>${d.results_open ? (S.confirm === "res-off" ? "한 번 더 눌러 공개 취소" : "공개 취소 (다시 제출 받기)") : S.confirm === "res-on" ? "한 번 더 눌러 공개" : "매칭 결과 공개하기"}</button></div></section>
+      ${picksPanel(d)}
+      <section style="display:grid;gap:10px"><div class="toolbar"><div class="sec-title"><h2>매칭된 쌍</h2><span>${d.matches.length}쌍</span></div><button class="btn sm ghost" data-act="csv-match">매칭 CSV</button></div>
+        ${d.matches.length ? `<div class="tbl-wrap"><table><thead><tr><th>남</th><th>여</th></tr></thead><tbody>${d.matches.map((m) => `<tr><td>${m.m_number}번 ${esc(m.m_name)}</td><td>${m.f_number}번 ${esc(m.f_name)}</td></tr>`).join("")}</tbody></table></div>` : `<div class="empty"><b>매칭된 쌍이 아직 없어요</b><p>참가자가 최종 선택을 제출하면 서로 선택한 쌍이 여기에 보여요.</p></div>`}
+        <p class="note">매칭된 상대의 연락처는 참가자 본인 화면에서 결과 공개 후에만 전달돼요.</p></section>`;
+  }
+
+  // [참가자 현황] 통계 + 목록(컴팩트) + CSV + 날짜 초기화
+  function tabPeople(d, rnd) {
+    const ppl = d.participants, men = ppl.filter((p) => p.gender === "M"), women = ppl.filter((p) => p.gender === "F");
     const submitted = ppl.filter((p) => p.submitted).length;
-    const rnd = S.data.round;
-    const pill = rnd ? `${esc(rnd.label)} · ${d.results_open ? "결과 공개" : "진행 중"}` : "회차 없음";
-    const head = `<header class="top"><div class="brand">gyeoL <small>진행자</small></div><div class="top-r"><span class="pill">${pill}</span><button class="link" data-act="logout">나가기</button></div></header>
+    return `<section class="stats">
+        <div class="stat"><small>명단</small><b>${ppl.length}<em>명 (남 ${men.length} · 여 ${women.length})</em></b></div>
+        <div class="stat"><small>최종 선택·설문 제출</small><b>${submitted}<em>/ ${ppl.length}명</em></b></div>
+        <div class="stat"><small>성비 확인</small><b>${men.length === women.length ? "균형" : "차이 " + Math.abs(men.length - women.length)}<em></em></b></div>
+      </section>
+      <section style="display:grid;gap:10px"><div class="toolbar"><div class="sec-title"><h2>참가자</h2><span>연락처는 진행자만 볼 수 있어요</span></div><button class="btn sm ghost" data-act="csv-people">참가자 CSV</button></div>
+        ${participantList(ppl)}</section>
+      <section class="panel"><h2>${esc(roundLabel(rnd.id))} 데이터 초기화</h2><p class="sub" style="font-size:13px">이 날짜의 모든 참가자, 메모, 선택, 설문을 <b>지우고</b> 결과 공개도 닫습니다. 다른 날짜는 그대로예요. 지난 회차 기록은 지우지 않는 한 계속 저장돼 있으니, 정말 필요할 때만 쓰세요. 되돌릴 수 없어요. 먼저 CSV를 내려받으세요.</p>
+        <button class="btn danger sm" style="justify-self:start" data-act="reset">${S.confirm === "reset" ? "정말 모두 삭제합니다" : "이 날짜 데이터 초기화"}</button></section>`;
+  }
+
+  // [설문 결과]
+  function tabSurvey(d, rnd) {
+    return `<section style="display:grid;gap:10px"><div class="toolbar"><div class="sec-title"><h2>${esc(roundLabel(rnd.id))} 설문 결과</h2><span>${d.surveys.length}명 응답</span></div>
+        <div><button class="btn sm ghost" data-act="csv-survey">설문 CSV</button></div></div>
+        ${surveyCards(d.surveys)}</section>`;
+  }
+
+  function dashView() {
+    const d = S.data, rnd = d.round;
+    const head = `<header class="top"><div class="brand">gyeoL <small>진행자</small></div><div class="top-r">${rnd ? `<span class="pill">${esc(roundLabel(rnd.id))} · ${d.results_open ? "결과 공개" : "진행 중"}</span>` : ""}<button class="link" data-act="logout">나가기</button></div></header>
       ${api.mode === "demo" ? `<div class="demo-bar">체험 모드 · 참가자 화면과 같은 브라우저 데이터를 사용해요. <a href="index.html?demo">참가자 화면</a></div>` : ""}`;
-    if (!rnd) {
-      return `${head}<main class="wrap wide">
-        <div class="empty"><b>아직 회차가 없어요</b><p>아래 '명단 가져오기'에서 구글 시트를 불러오면 회차가 만들어져요.</p></div>
-        ${addPanel()}${importPanel(d)}${entryPanel()}</main>`;
-    }
-    return `${head}${roundBar()}
-      <main class="wrap wide">
-        <section class="panel"><div class="toolbar"><h2>${esc(rnd.label)} 매칭 결과</h2><button class="btn sm ghost" data-act="refresh">새로고침</button></div>
-          <p class="note">참가자는 <b>언제든</b> 최종 선택과 설문을 제출·수정할 수 있어요. 아래 버튼을 누르면 이 회차의 <b>매칭 결과(서로 선택한 경우 연락처 포함)가 참가자 화면에 공개</b>되고, 그 뒤에는 선택을 더 바꿀 수 없어요. 공개 전에 '제출' 인원을 확인하세요. 회차마다 따로 공개해요.</p>
-          <div class="resultbar"><span class="tag ${d.results_open ? "y" : "n"}">${d.results_open ? "결과 공개 중" : "아직 비공개"}</span><span class="sub" style="font-size:13px">제출 ${submitted} / ${ppl.length}명 · 매칭 ${d.matches.length}쌍${(d.picks || []).some((x) => !x.target_id) ? ` · <b class="badtxt">확인 필요 ${(d.picks || []).filter((x) => !x.target_id).length}건</b>` : ""}</span>
-            <button class="btn ${d.results_open ? "ghost" : ""}" style="width:auto" data-act="results" ${S.busy ? "disabled" : ""}>${d.results_open ? (S.confirm === "res-off" ? "한 번 더 눌러 공개 취소" : "공개 취소 (다시 제출 받기)") : S.confirm === "res-on" ? "한 번 더 눌러 공개" : "매칭 결과 공개하기"}</button></div></section>
-        <section class="stats">
-          <div class="stat"><small>명단</small><b>${ppl.length}<em>명 (남 ${men.length} · 여 ${women.length})</em></b></div>
-          <div class="stat"><small>최종 선택·설문 제출</small><b>${submitted}<em>/ ${ppl.length}명</em></b></div>
-          <div class="stat"><small>서로 선택(매칭)</small><b>${d.matches.length}<em>쌍</em></b></div>
-          <div class="stat"><small>확인 필요한 선택</small><b class="${(d.picks || []).some((x) => !x.target_id) ? "badtxt" : ""}">${(d.picks || []).filter((x) => !x.target_id).length}<em>건</em></b></div>
-          <div class="stat"><small>성비 확인</small><b>${men.length === women.length ? "균형" : "차이 " + Math.abs(men.length - women.length)}<em></em></b></div>
-        </section>
-        <div class="two">
-          <section style="display:grid;gap:10px"><div class="sec-title"><h2>참가자</h2><span>${ppl.length}명 · 연락처는 진행자만 볼 수 있어요</span></div>
-            ${participantList(ppl)}
-          </section>
-          <section style="display:grid;gap:10px"><div class="sec-title"><h2>매칭 결과</h2><span>${d.matches.length}쌍</span></div>
-            ${d.matches.length ? `<div class="tbl-wrap"><table><thead><tr><th>남</th><th>여</th></tr></thead><tbody>${d.matches.map((m) => `<tr><td>${m.m_number}번 ${esc(m.m_name)}</td><td>${m.f_number}번 ${esc(m.f_name)}</td></tr>`).join("")}</tbody></table></div>` : `<div class="empty"><b>매칭된 쌍이 아직 없어요</b><p>참가자가 최종 선택을 제출하면 서로 선택한 쌍이 여기에 보여요.</p></div>`}
-            <p class="note">매칭된 상대의 연락처는 참가자 본인 화면에서 결과 발표 후에만 전달돼요.</p>
-          </section>
-        </div>
-        ${picksPanel(d)}
-        ${addPanel()}
-        <section style="display:grid;gap:10px"><div class="toolbar"><div class="sec-title"><h2>설문 결과</h2><span>${d.surveys.length}명 응답</span></div>
-          <div><button class="btn sm ghost" data-act="csv-survey">설문 CSV</button><button class="btn sm ghost" data-act="csv-match">매칭 CSV</button></div></div>
-          ${surveyCards(d.surveys)}</section>
-        ${importPanel(d)}
-        ${entryPanel()}
-        <section class="panel"><h2>${esc(rnd.label)} 초기화</h2><p class="sub" style="font-size:13px">이 회차의 모든 참가자, 메모, 선택, 설문을 지우고 결과 공개도 닫습니다. 다른 회차는 그대로예요. 되돌릴 수 없으니 먼저 CSV를 내려받으세요.</p>
-          <button class="btn danger sm" style="justify-self:start" data-act="reset">${S.confirm === "reset" ? "정말 모두 삭제합니다" : "이 회차 초기화"}</button></section>
-      </main>`;
+    // 날짜(회차)가 하나도 없으면 '참가자 추가' 탭만 쓸 수 있다
+    const tab = rnd ? S.tab : "add";
+    const nav = `<nav class="tabs" aria-label="진행자 메뉴">${TABS.map(([id, label, icon]) => `<button data-act="tab" data-v="${id}" class="${tab === id ? "on" : ""}" ${tab === id ? 'aria-current="page"' : ""} ${!rnd && id !== "add" ? "disabled" : ""}><span class="ico">${icon}</span>${label}</button>`).join("")}</nav>`;
+    let body;
+    if (!rnd) body = `<div class="empty"><b>아직 날짜(회차)가 없어요</b><p>날짜를 골라 참가자를 추가하거나 구글 시트를 가져오면 그 날짜 회차가 만들어져요.</p></div>${addPanel()}${importPanel(d)}${entryPanel()}`;
+    else if (tab === "picks") body = tabPicks(d, rnd);
+    else if (tab === "people") body = tabPeople(d, rnd);
+    else if (tab === "survey") body = tabSurvey(d, rnd);
+    else body = `${addPanel()}${importPanel(d)}${entryPanel()}`;
+    return `${head}${roundBar()}<main class="wrap wide admin-main">${body}</main>${nav}`;
   }
 
   function render() {
@@ -307,6 +331,12 @@
 
   const actions = {
     refresh: () => run(async () => {}),
+    tab: (t) => { S.tab = t.dataset.v; S.confirm = ""; try { sessionStorage.setItem("rn_admin_tab", S.tab); } catch (e) { /* 무시 */ } render(); window.scrollTo(0, 0); },
+    "csv-people": () => {
+      const rows = [["번호", "성별", "이름", "연락처", "나이", "대학·학과", "MBTI", "취미", "설문 제출"]];
+      S.data.participants.forEach((p) => rows.push([p.number, p.gender === "M" ? "남" : "여", p.name, fmtPhone(p.phone), p.age_label || "", p.school || "", p.mbti || "", p.hobby || "", p.submitted ? "제출" : ""]));
+      downloadCSV("participants-" + S.round + ".csv", rows);
+    },
     "pick-toggle": (t) => { S.openPick[t.dataset.id] = !S.openPick[t.dataset.id]; delete S.pickEdit[t.dataset.id]; render(); },
     "pick-save": (t) => {
       const id = t.dataset.id;
@@ -321,12 +351,12 @@
         const mine = picks.filter((x) => x.participant_id === p.id).sort((a, b) => a.rank - b.rank);
         rows.push([p.number, p.gender === "M" ? "남" : "여", p.name, ...Array.from({ length: MAX_PICKS }, (_, i) => (mine[i] ? pickLabel(mine[i]) : ""))]);
       });
-      downloadCSV("picks-" + S.round.replace(/[\\/]/g, "-") + ".csv", rows);
+      downloadCSV("picks-" + S.round + ".csv", rows);
     },
     "edit-person": (t) => {
       const p = S.data.participants.find((x) => x.id === t.dataset.id);
       if (!p) return;
-      S.add = { open: true, editing: true, round: "", name: p.name || "", gender: p.gender, phone: fmtPhone(p.phone), number: String(p.number), age: p.age_label || "", school: p.school || "", mbti: p.mbti || "", hobby: p.hobby || "" };
+      S.tab = "add"; S.add = { open: true, editing: true, round: "", name: p.name || "", gender: p.gender, phone: fmtPhone(p.phone), number: String(p.number), age: p.age_label || "", school: p.school || "", mbti: p.mbti || "", hobby: p.hobby || "" };
       render(); document.getElementById("add-details")?.scrollIntoView({ block: "center" });
     },
     "add-cancel": () => { S.add = emptyAdd(); S.add.open = false; render(); },
@@ -357,7 +387,7 @@
       });
       const rows = [["성별", ...cols.map((c) => c[0])]];
       S.data.surveys.forEach((s) => rows.push([s.gender === "M" ? "남" : "여", ...cols.map((c) => c[1](s.answers || {}))]));
-      downloadCSV("survey-" + S.round.replace(/[\\/]/g, "-") + ".csv", rows);
+      downloadCSV("survey-" + S.round + ".csv", rows);
     },
     // 인쇄용 큰 QR 이미지(PNG, 흰 여백 포함)를 만들어 저장한다
     "qr-save": () => {
@@ -386,8 +416,8 @@
       run(async () => {
         const rows = b.rows.map((p) => ({ phone: p.phone, gender: p.gender, name: p.name, age_label: p.age_label, school: p.school, mbti: p.mbti, hobby: p.hobby, number: p.number }));
         const data = im.table.slice(1);
-        const rid = (im.date || String(im.roundName || S.round || "").trim()).trim();
-        const label = im.date ? Roster.dateLabel(data, im.map, im.date) : rid;
+        const rid = im.date ? toRoundId(im.date) : (im.roundId || S.round || todayISO());
+        const label = roundLabel(rid);
         im.done = await api.admin.import(S.pin, rid, label, rows, im.prune);
         S.round = rid;
         toast(label + " 명단을 가져왔어요.");
@@ -396,7 +426,7 @@
     "csv-match": () => {
       const rows = [["남 번호", "남 이름", "여 번호", "여 이름"]];
       S.data.matches.forEach((m) => rows.push([m.m_number, m.m_name, m.f_number, m.f_name]));
-      downloadCSV("matches-" + S.round.replace(/[\\/]/g, "-") + ".csv", rows);
+      downloadCSV("matches-" + S.round + ".csv", rows);
     },
   };
 
@@ -411,7 +441,7 @@
       f.text().then((txt) => { im.text = ""; loadImport(txt, f.name); render(); }).catch(() => { im.error = "파일을 읽지 못했어요."; render(); });
     } else if (t.dataset && t.dataset.field) { im.map[t.dataset.field] = Number(t.value); render(); }
     else if (t.id === "imp-date") { im.date = t.value; render(); }
-    else if (t.id === "imp-round") { im.roundName = t.value; }
+    else if (t.id === "imp-round") { im.roundId = t.value; }
     else if (t.id === "imp-numbered") { im.numberedOnly = t.checked; render(); }
     else if (t.id === "imp-prune") { im.prune = t.checked; S.confirm = ""; render(); }
     else if (t.id === "only-bad") { S.onlyBad = t.checked; render(); }
@@ -444,13 +474,13 @@
     e.preventDefault();
     if (e.target.id === "f-add") {
       const a = S.add, phone = normPhone(a.phone), name = a.name.trim();
-      const rid = S.data.round ? S.round : String(a.round || "").trim();
-      if (!rid) return toast("회차 이름을 적어 주세요.");
+      const rid = a.editing ? S.round : (a.round || S.round || todayISO());
+      if (!rid) return toast("날짜를 골라 주세요.");
       if (!name) return toast("이름을 적어 주세요.");
       if (!a.gender) return toast("성별을 골라 주세요.");
       if (!/^01\d{8,9}$/.test(phone)) return toast("연락처를 정확히 입력해 주세요.");
       const row = { phone, gender: a.gender, name, number: a.number ? parseInt(a.number, 10) : null, age_label: Roster.normAge(a.age), school: a.school.trim(), mbti: Roster.normMbti(a.mbti), hobby: a.hobby.trim() };
-      const label = S.data.round ? S.data.round.label : rid;
+      const label = roundLabel(rid);
       run(async () => {
         const r = await api.admin.import(S.pin, rid, label, [row], false);
         S.round = rid;

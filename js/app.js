@@ -1,7 +1,7 @@
 /* 참가자 화면: 내 프로필 · 대화 카드 · 메모장 · 최종 선택 */
 (() => {
   const api = window.api;
-  const { SURVEY, MAX_PICKS, MEMO_SLOTS, friendly, digits, fmtPhone, splitSchool, splitHobby } = window.RN;
+  const { SURVEY, MAX_PICKS, MEMO_SLOTS, roundLabel, friendly, digits, fmtPhone, splitSchool, splitHobby } = window.RN;
   const $app = document.getElementById("app");
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const TOPICS = window.TOPICS;
@@ -74,7 +74,7 @@
   // 두 회차 이상에 신청한 번호는 어느 회차에 참석하는지 고른다
   function choiceForm() {
     return `<section class="panel"><h2>오늘 참석하는 회차를 골라 주세요</h2>
-      <div class="rounds">${S.choices.list.map((c) => `<button class="btn" type="button" data-act="pickround" data-v="${esc(c.round_id)}" ${S.busy ? "disabled" : ""}>${esc(c.label)}</button>`).join("")}</div>
+      <div class="rounds">${S.choices.list.map((c) => `<button class="btn" type="button" data-act="pickround" data-v="${esc(c.round_id)}" ${S.busy ? "disabled" : ""}>${esc(roundLabel(c.round_id))}</button>`).join("")}</div>
       ${S.error ? `<p class="err">${esc(S.error)}</p>` : ""}
       <button class="link" type="button" data-act="backlogin" style="justify-self:start">← 번호 다시 입력</button></section>`;
   }
@@ -106,7 +106,7 @@
     return `${howto("내 프로필 카드", "상대에게 나를 소개하는 카드예요. 이 정보를 보고 편하게 이야기를 시작해 보세요. 내용이 다르면 운영진에게 알려 주세요.")}
       <article class="idcard" aria-label="${g} ${m.number}번 ${esc(m.name)}">
         <div class="id-thread"></div>
-        <div class="id-top"><span class="id-brand">gyeoL</span><span class="id-round">${esc(m.round_label || "")}</span></div>
+        <div class="id-top"><span class="id-brand">gyeoL</span><span class="id-round">${esc(roundLabel(m.round_id))}</span></div>
         <div class="id-no" aria-hidden="true"><span class="id-g">${g}</span><span class="id-n">${m.number}</span><span class="id-u">번</span></div>
         <h3 class="id-name">${esc(m.name)}</h3>
         <dl class="id-grid">

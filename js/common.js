@@ -32,7 +32,8 @@
     not_ready: "아직 매칭 결과가 공개되지 않았어요.",
     invalid_slot: "메모 칸 번호가 올바르지 않아요.",
     bad_pin: "마스터키가 맞지 않아요.",
-    round_required: "가져올 회차를 정해 주세요.",
+    round_required: "날짜를 골라 주세요.",
+    invalid_round: "날짜 형식이 올바르지 않아요.",
     number_taken: "같은 성별에 이미 쓰고 있는 번호예요.",
     invalid_number: "번호는 1 이상의 숫자여야 해요.",
     participants_round_gender_number_key: "같은 성별에 번호가 겹쳐요. 시트에서 연락처를 바꾼 사람이 있다면, 아래 표에서 이전 행을 삭제하거나 '기존 참가자 삭제' 옵션을 켜고 다시 가져와 주세요.",
@@ -48,6 +49,35 @@
     for (const k in ERRORS) if (head.includes(k)) return ERRORS[k];
     return "문제가 생겼어요: " + head;
   }
+
+  /* ───────────── 회차(날짜) ─────────────
+   * 회차는 'YYYY-MM-DD' 로 저장하고, 화면에는 모두 '11/8 (일)' 형식으로 보여준다. (연도가 올해와 다르면 '2025.11.8 (토)')
+   * 연도를 id 에 넣는 이유: 해마다 같은 날짜(예: 11/8)가 겹쳐도 지난 회차의 데이터가 섞이지 않게 하려는 것. */
+  const ISO_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
+  const WEEKDAY = ["일", "월", "화", "수", "목", "금", "토"];
+  const p2 = (n) => String(n).padStart(2, "0");
+  const todayISO = (now) => { now = now || new Date(); return now.getFullYear() + "-" + p2(now.getMonth() + 1) + "-" + p2(now.getDate()); };
+  function roundLabel(id) {
+    const m = ISO_RE.exec(String(id || ""));
+    if (!m) return String(id || "");
+    const y = +m[1], mo = +m[2], d = +m[3], wd = WEEKDAY[new Date(y, mo - 1, d).getDay()];
+    return y === new Date().getFullYear() ? mo + "/" + d + " (" + wd + ")" : y + "." + mo + "." + d + " (" + wd + ")";
+  }
+  // 시트의 '11/8' 같은 날짜를 회차 id 로 바꾼다. 올해 기준이고, 5개월 넘게 지난 날짜면 내년으로 본다.
+  function toRoundId(token, now) {
+    now = now || new Date();
+    const [m, d] = String(token).split("/").map(Number);
+    let y = now.getFullYear();
+    if ((now - new Date(y, m - 1, d)) / 86400000 > 150) y += 1;
+    return y + "-" + p2(m) + "-" + p2(d);
+  }
+  // 날짜 드롭다운 목록: 오늘 기준 -90일 ~ +180일, 그리고 이미 있는 회차
+  function dateChoices(existingIds) {
+    const set = new Set(existingIds || []), now = new Date();
+    for (let i = -90; i <= 180; i++) set.add(todayISO(new Date(now.getFullYear(), now.getMonth(), now.getDate() + i)));
+    return Array.from(set).sort();
+  }
+  const roundTag = (id) => { const t = todayISO(); return id === t ? "오늘" : id > t ? "예정" : "지난"; };
 
   /* ───────────── 공용 도우미 ───────────── */
   const digits = (s) => String(s || "").replace(/\D/g, "");
@@ -156,11 +186,14 @@
       }));
       return out;
     };
-    const fresh = () => ({
-      rounds: { "11/8": { label: "11/8 (일)", results_open: false }, "11/6": { label: "11/6 (금)", results_open: false } },
-      people: seedRound("11/8", 9, 9, "0100000").concat(seedRound("11/6", 3, 3, "0100000").map((p, i) => (i === 0 ? p : Object.assign(p, { phone: "0109999" + p.phone.slice(7), name: p.name + "B" })))),
+    const fresh = () => {
+      const Y = new Date().getFullYear(), R8 = Y + "-11-08", R6 = Y + "-11-06";
+      return {
+      rounds: { [R8]: { label: roundLabel(R8), results_open: false }, [R6]: { label: roundLabel(R6), results_open: false } },
+      people: seedRound(R8, 9, 9, "0100000").concat(seedRound(R6, 3, 3, "0100000").map((p, i) => (i === 0 ? p : Object.assign(p, { phone: "0109999" + p.phone.slice(7), name: p.name + "B" })))),
       session: null, notes: {}, picks: {}, surveys: {}, seq: 1,
-    });
+      };
+    };
     const load = () => { try { return JSON.parse(localStorage.getItem(KEY)) || fresh(); } catch (e) { return fresh(); } };
     const save = (s) => localStorage.setItem(KEY, JSON.stringify(s));
     const op = async (fn) => { await new Promise((r) => setTimeout(r, 50)); const s = load(); const r = fn(s); save(s); return r; };
@@ -316,6 +349,7 @@
           checkAdmin(pin);
           if (!String(round || "").trim()) fail("round_required");
           round = String(round).trim();
+          if (!ISO_RE.test(round)) fail("invalid_round");
           if (!s.rounds[round]) s.rounds[round] = { label: label || round, results_open: false };
           else s.rounds[round].label = label || s.rounds[round].label;
           let ins = 0, upd = 0, skipped = 0, pruned = 0;
@@ -350,5 +384,5 @@
   }
 
   window.api = isDemo ? demoApi() : liveApi();
-  window.RN = { SURVEY, MAX_PICKS, MEMO_SLOTS, friendly, digits, normPhone, fmtPhone, splitSchool, splitHobby };
+  window.RN = { SURVEY, MAX_PICKS, MEMO_SLOTS, roundLabel, roundTag, toRoundId, dateChoices, todayISO, friendly, digits, normPhone, fmtPhone, splitSchool, splitHobby };
 })();
