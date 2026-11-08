@@ -15,7 +15,7 @@
     { id: "q3", type: "matrix", label: "대화 시간은 어땠나요?", options: ["짧았어요", "적당했어요", "길었어요"],
       rows: [{ id: "group", label: "3:3 그룹 (8분)" }, { id: "one", label: "1:1 로테이션 (5분)" }] },
     { id: "q4", type: "scale", label: "질문 카드가 대화에 도움이 됐나요?", low: "별로였어요", high: "큰 도움" },
-    { id: "q5", type: "choice", label: "참가비 29,000원은 어땠나요?", options: ["저렴해요", "적당해요", "조금 비싸요", "비싸요"] },
+    { id: "q5", type: "choice", label: "참가비는 어땠나요?", options: ["저렴해요", "적당해요", "조금 비싸요", "비싸요"] },
     { id: "q6", type: "multi", label: "다음 회차는 언제가 좋을까요? (복수 선택)", options: ["평일 저녁", "금요일 저녁", "주말 낮", "주말 저녁"] },
     { id: "q7", type: "text", label: "만족스러웠던 점은?", placeholder: "자유롭게 적어 주세요" },
     { id: "q8", type: "text", label: "아쉬웠던 점은?", placeholder: "자유롭게 적어 주세요" },
@@ -41,7 +41,7 @@
   function friendly(err) {
     const msg = (err && err.message) || String(err);
     const [head, detail] = msg.split(" :: ");
-    if (head.includes("not_found")) return "'" + detail + "'에 해당하는 번호나 이름을 찾지 못했어요. 이름은 성까지 정확히 적어 주세요.";
+    if (head.includes("not_found")) return "'" + detail + "'에 해당하는 번호나 이름을 찾지 못했어요. 이름은 성+이름으로 정확히 적어 주세요.";
     if (head.includes("ambiguous_name")) return "'" + detail + "' 이름이 여러 명이에요. 번호로 적어 주세요.";
     if (head.includes("duplicate_pick")) return "'" + detail + "'은(는) 이미 적었어요.";
     for (const k in ERRORS) if (head.includes(k)) return ERRORS[k];

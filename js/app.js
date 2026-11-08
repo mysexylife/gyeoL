@@ -150,7 +150,7 @@
 
   /* ───────── 뷰: 최종 선택 ───────── */
   function pickView() {
-    const guide = howto("최종 선택", `오늘 마음에 든 이성을 최대 ${MAX_PICKS}명까지 <b>번호 또는 이름만</b> 적어 제출하는 곳이에요. 이름은 <b>성까지 포함</b>해서 적어 주세요. 서로 선택하면 매칭돼요. 제출은 언제든 할 수 있고 고쳐서 다시 낼 수 있어요. 매칭 결과는 진행자가 공개하면 이 탭에서 확인해요.`);
+    const guide = howto("최종 선택", `오늘 마음에 든 이성을 최대 ${MAX_PICKS}명까지 <b>번호 또는 이름만</b> 적어 제출하는 곳이에요. 이름은 <b>성+이름</b>으로 적어 주세요. 서로 선택하면 매칭돼요. 제출은 언제든 할 수 있고 고쳐서 다시 낼 수 있어요. 매칭 결과는 진행자가 공개하면 이 탭에서 확인해요.`);
     if (S.resultsOpen) return guide + resultView();
     if (S.mine.submitted && !S.editSel) {
       const ps = S.mine.picks;
@@ -162,8 +162,8 @@
     return `${guide}
       <div class="sec-title"><h2>최종 선택</h2><span>최대 ${MAX_PICKS}명</span></div>
       <section class="panel">
-        <p class="sub" style="font-size:13px"><b>번호 또는 이름만</b> 적어 주세요. 이름은 <b>성까지 포함</b>해서 적어요 (예: 3 / 김지은). 순서가 <b>1순위, 2순위, 3순위</b>예요. 다 채우지 않아도 괜찮고, 순서는 상대에게 알려지지 않아요.</p>
-        ${[0, 1, 2].map((i) => `<div class="pkfield"><label for="pk${i}">${i + 1}순위</label><input id="pk${i}" type="text" data-bind="pick" data-i="${i}" placeholder="번호 또는 성까지 이름 (예: 3, 김지은)" value="${esc(S.draftInputs[i])}" autocomplete="off" enterkeyhint="next"></div>`).join("")}
+        <p class="sub" style="font-size:13px"><b>번호 또는 이름만</b> 적어 주세요. 이름은 <b>성+이름</b>으로 적어요 (예: 3 / 김지은). 순서가 <b>1순위, 2순위, 3순위</b>예요. 다 채우지 않아도 괜찮고, 순서는 상대에게 알려지지 않아요.</p>
+        ${[0, 1, 2].map((i) => `<div class="pkfield"><label for="pk${i}">${i + 1}순위</label><input id="pk${i}" type="text" data-bind="pick" data-i="${i}" placeholder="번호 또는 성+이름 (예: 3, 김지은)" value="${esc(S.draftInputs[i])}" autocomplete="off" enterkeyhint="next"></div>`).join("")}
       </section>
       <section class="panel"><h2>참가 후기 설문</h2><p class="sub" style="font-size:13px">익명으로 집계돼요. 최종 선택과 함께 제출됩니다.</p>${surveyHTML()}</section>
       ${S.error ? `<p class="err">${esc(S.error)}</p>` : ""}
