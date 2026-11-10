@@ -34,6 +34,7 @@
     bad_pin: "마스터키가 맞지 않아요.",
     round_required: "날짜를 골라 주세요.",
     invalid_round: "날짜 형식이 올바르지 않아요.",
+    invalid_time: "시간 형식이 올바르지 않아요. 19:00 처럼 적어 주세요.",
     number_taken: "같은 성별에 이미 쓰고 있는 번호예요.",
     invalid_number: "번호는 1 이상의 숫자여야 해요.",
     participants_round_gender_number_key: "같은 성별에 번호가 겹쳐요. 시트에서 연락처를 바꾼 사람이 있다면, 아래 표에서 이전 행을 삭제하거나 '기존 참가자 삭제' 옵션을 켜고 다시 가져와 주세요.",
@@ -53,7 +54,7 @@
   /* ───────────── 회차(날짜) ─────────────
    * 회차는 'YYYY-MM-DD'(예: 2026-11-08) 한 가지 형식으로 저장하고, 화면에도 같은 형식으로 보여준다.
    * 연도를 id 에 넣는 이유: 해마다 같은 날짜(예: 11/8)가 겹쳐도 지난 회차의 데이터가 섞이지 않게 하려는 것. */
-  const ISO_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
+  const ISO_RE = /^(\d{4})-(\d{2})-(\d{2})( \d{2}:\d{2})?$/;   // 'YYYY-MM-DD' 또는 시간 타임이 있는 'YYYY-MM-DD HH:MM'
   const WEEKDAY = ["일", "월", "화", "수", "목", "금", "토"];
   const p2 = (n) => String(n).padStart(2, "0");
   const todayISO = (now) => { now = now || new Date(); return now.getFullYear() + "-" + p2(now.getMonth() + 1) + "-" + p2(now.getDate()); };
@@ -72,7 +73,20 @@
     for (let i = -90; i <= 180; i++) set.add(todayISO(new Date(now.getFullYear(), now.getMonth(), now.getDate() + i)));
     return Array.from(set).sort();
   }
-  const roundTag = (id) => { const t = todayISO(); return id === t ? "오늘" : id > t ? "예정" : "지난"; };
+  const roundDate = (id) => String(id || "").slice(0, 10);   // 시간 타임을 뗀 날짜 부분
+  const roundTag = (id) => { const t = todayISO(), d = roundDate(id); return d === t ? "오늘" : d > t ? "예정" : "지난"; };
+  // 날짜 + 직접 입력한 시간("19:00", "1900", "7:30")으로 회차 id 를 만든다. 시간이 비어 있으면 날짜만. 시간 형식이 이상하면 null
+  function mkRound(date, time) {
+    date = String(date || "").trim(); time = String(time || "").trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+    if (!time) return date;
+    const m = time.match(/^(\d{1,2})\s*:?\s*(\d{2})?$/);
+    if (!m) return null;
+    const h = parseInt(m[1], 10), mi = m[2] === undefined ? 0 : parseInt(m[2], 10);
+    if (h > 23 || mi > 59) return null;
+    return date + " " + p2(h) + ":" + p2(mi);
+  }
+  const isRoundId = (id) => ISO_RE.test(String(id || ""));
 
   /* ───────────── 공용 도우미 ───────────── */
   const digits = (s) => String(s || "").replace(/\D/g, "");
@@ -431,5 +445,5 @@
   }
 
   window.api = isDemo ? demoApi() : liveApi();
-  window.RN = { SURVEY, MAX_PICKS, MEMO_SLOTS, roundLabel, roundTag, toRoundId, dateChoices, todayISO, friendly, digits, normPhone, fmtPhone, splitSchool, splitHobby };
+  window.RN = { SURVEY, MAX_PICKS, MEMO_SLOTS, roundLabel, roundTag, roundDate, mkRound, isRoundId, toRoundId, dateChoices, todayISO, friendly, digits, normPhone, fmtPhone, splitSchool, splitHobby };
 })();

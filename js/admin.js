@@ -1,14 +1,14 @@
 /* 진행자 화면: 단계 전환, 참가 현황, 매칭, 설문 집계, CSV */
 (() => {
   const api = window.api;
-  const { SURVEY, MAX_PICKS, friendly, splitSchool, fmtPhone, normPhone, roundLabel, roundTag, toRoundId, todayISO } = window.RN;
+  const { SURVEY, MAX_PICKS, friendly, splitSchool, fmtPhone, normPhone, roundLabel, roundTag, roundDate, mkRound, isRoundId, toRoundId, todayISO } = window.RN;
   const Roster = window.Roster;   // 나이·MBTI 정리에만 쓴다 (명단 가져오기는 쓰지 않음)
   const $app = document.getElementById("app");
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
-  const S = { pin: "", data: null, applicants: [], appl: { date: "", gender: "", showAssigned: false, sel: {}, target: "", newdate: "" }, error: "", confirm: "", busy: false, round: "", rounds: [], tab: "picks", open: {}, openPick: {}, pickEdit: {}, onlyBad: false,
-    add: { open: false, editing: false, round: "", newdate: "", name: "", gender: "", phone: "", number: "", age: "", school: "", mbti: "", hobby: "" },
-    imp: { dest: "applicants", text: "", fileName: "", table: null, map: {}, date: "", round: "", newdate: "", numberedOnly: false, onlyDate: true, prune: false, done: null, error: "" } };
+  const S = { pin: "", data: null, applicants: [], appl: { date: "", gender: "", showAssigned: false, sel: {}, target: "", newdate: "", newtime: "" }, error: "", confirm: "", busy: false, round: "", rounds: [], tab: "picks", open: {}, openPick: {}, pickEdit: {}, onlyBad: false,
+    add: { open: false, editing: false, round: "", newdate: "", newtime: "", name: "", gender: "", phone: "", number: "", age: "", school: "", mbti: "", hobby: "" },
+    imp: { dest: "applicants", text: "", fileName: "", table: null, map: {}, date: "", round: "", newdate: "", newtime: "", numberedOnly: false, onlyDate: true, prune: false, done: null, error: "" } };
   try { S.pin = sessionStorage.getItem("rn_admin_pin") || ""; S.round = sessionStorage.getItem("rn_admin_round") || ""; S.tab = sessionStorage.getItem("rn_admin_tab") || "picks"; } catch (e) { /* 저장소 사용 불가 */ }
 
   let toastTimer;
@@ -24,7 +24,7 @@
     if (!S.rounds.some((r) => r.id === S.round)) {
       const withData = S.rounds.filter((r) => r.count > 0).map((r) => r.id).sort();
       const ids = withData.length ? withData : S.rounds.map((r) => r.id).sort(), t = todayISO();
-      S.round = ids.includes(t) ? t : ids.find((i) => i > t) || ids[ids.length - 1] || "";
+      S.round = ids.find((i) => roundDate(i) === t) || ids.find((i) => roundDate(i) > t) || ids[ids.length - 1] || "";
     }
     S.applicants = await api.admin.applicants(S.pin);
     S.data = S.round ? await api.admin.dashboard(S.pin, S.round) : { round: null, results_open: false, participants: [], matches: [], surveys: [] };
@@ -96,9 +96,9 @@
   const addRoundValue = () => (S.add.editing ? S.round : S.add.round || (knownRounds().some((r) => r.id === S.round) ? S.round : "__new"));
   function addDateFields() {
     const a = S.add, cur = addRoundValue(), t = todayISO();
-    const opts = knownRounds().map((r) => `<option value="${esc(r.id)}" ${r.id === cur ? "selected" : ""}>${esc(roundLabel(r.id))}${r.id === t ? " · 오늘" : ""} · ${r.count}명</option>`).join("");
+    const opts = knownRounds().map((r) => `<option value="${esc(r.id)}" ${r.id === cur ? "selected" : ""}>${esc(roundLabel(r.id))}${roundDate(r.id) === t ? " · 오늘" : ""} · ${r.count}명</option>`).join("");
     const sel = `<select id="add-round" ${a.editing ? "disabled" : ""}>${opts}<option value="__new" ${cur === "__new" ? "selected" : ""}>＋ 새 날짜 추가…</option></select>`;
-    const nd = cur === "__new" && !a.editing ? `<label class="mp" for="add-newdate"><span>새 날짜 * <small>달력에서 고르면 YYYY-MM-DD로 저장돼요</small></span><input type="date" id="add-newdate" value="${esc(a.newdate || t)}" required></label>` : "";
+    const nd = cur === "__new" && !a.editing ? `<label class="mp" for="add-newdate"><span>새 날짜 * <small>달력에서 고르면 YYYY-MM-DD로 저장돼요</small></span><input type="date" id="add-newdate" value="${esc(a.newdate || t)}" required></label><label class="mp" for="add-newtime"><span>시간 타임 <small>선택 · 예: 19:00 (같은 날 여러 타임이면 입력)</small></span><input type="text" id="add-newtime" inputmode="numeric" placeholder="19:00" maxlength="5" value="${esc(a.newtime || "")}"></label>` : "";
     return `<label class="mp" for="add-round"><span>날짜 *</span>${sel}</label>${nd}`;
   }
 
@@ -156,7 +156,7 @@
       body = `<div class="mapgrid">${["phone", "name", "gender", ...(toApp ? [] : ["number"]), "age", "school", "mbti", "hobby", "date", ...(toApp ? ["photo"] : [])].map(sel).join("")}</div>
         <div class="filters">
           ${dates.length
-            ? `<label class="mp"><span>가져올 날짜 (시트)</span><select id="imp-date">${toApp ? `<option value="" ${im.date === "" ? "selected" : ""}>전체 날짜</option>` : ""}${dates.map((x) => `<option value="${x}" ${im.date === x ? "selected" : ""}>${esc(roundLabel(toRoundId(x)))}</option>`).join("")}</select></label>`
+            ? `<label class="mp"><span>가져올 날짜 (시트)</span><select id="imp-date">${toApp ? `<option value="" ${im.date === "" ? "selected" : ""}>전체 날짜</option>` : ""}${dates.map((x) => `<option value="${x}" ${im.date === x ? "selected" : ""}>${esc(roundLabel(toRoundId(x)))}</option>`).join("")}</select></label>${toApp ? "" : timeField("imp-newtime", im.newtime)}`
             : (toApp ? "" : `${importDateFields()}`)}
           <label class="ck"><input type="checkbox" id="imp-onlydate" ${im.onlyDate ? "checked" : ""}> 이 날짜만 고른 사람만 (다른 날짜도 고른 사람 제외)</label>
           ${toApp ? "" : `<label class="ck"><input type="checkbox" id="imp-numbered" ${im.numberedOnly ? "checked" : ""}> 현장 번호가 있는 사람만</label>
@@ -191,11 +191,12 @@
 
   // 시트에 날짜 열이 없을 때: 참가자가 있는 날짜 중에서 고르거나 새 날짜를 만든다
   const impRoundValue = () => S.imp.round || (knownRounds().some((r) => r.id === S.round) ? S.round : "__new");
+  const timeField = (id, v) => `<label class="mp" for="${id}"><span>시간 타임 <small>선택 · 예: 19:00</small></span><input type="text" id="${id}" inputmode="numeric" placeholder="19:00" maxlength="5" value="${esc(v || "")}"></label>`;
   function importDateFields() {
     const im = S.imp, cur = impRoundValue(), t = todayISO();
-    const opts = knownRounds().map((r) => `<option value="${esc(r.id)}" ${r.id === cur ? "selected" : ""}>${esc(roundLabel(r.id))}${r.id === t ? " · 오늘" : ""} · ${r.count}명</option>`).join("");
+    const opts = knownRounds().map((r) => `<option value="${esc(r.id)}" ${r.id === cur ? "selected" : ""}>${esc(roundLabel(r.id))}${roundDate(r.id) === t ? " · 오늘" : ""} · ${r.count}명</option>`).join("");
     return `<label class="mp" for="imp-round"><span>저장할 날짜</span><select id="imp-round">${opts}<option value="__new" ${cur === "__new" ? "selected" : ""}>＋ 새 날짜 추가…</option></select></label>`
-      + (cur === "__new" ? `<label class="mp" for="imp-newdate"><span>새 날짜</span><input type="date" id="imp-newdate" value="${esc(im.newdate || t)}"></label>` : "");
+      + (cur === "__new" ? `<label class="mp" for="imp-newdate"><span>새 날짜</span><input type="date" id="imp-newdate" value="${esc(im.newdate || t)}"></label>${timeField("imp-newtime", im.newtime)}` : "");
   }
 
   /* ───────── 회차 선택 + 참가자 목록(컴팩트) ───────── */
@@ -230,7 +231,7 @@
   }
 
   /* ───────── 참가자 직접 추가·수정 ───────── */
-  const emptyAdd = () => ({ open: true, editing: false, round: "", newdate: "", name: "", gender: "", phone: "", number: "", age: "", school: "", mbti: "", hobby: "" });
+  const emptyAdd = () => ({ open: true, editing: false, round: "", newdate: "", newtime: "", name: "", gender: "", phone: "", number: "", age: "", school: "", mbti: "", hobby: "" });
   function addPanel() {
     const a = S.add, hasRound = !!(S.data && S.data.round);
     const f = (id, label, input) => `<label class="mp" for="add-${id}"><span>${label}</span>${input}</label>`;
@@ -373,7 +374,7 @@
         </div>
         <div class="filters">
           <label class="mp"><span>배정할 날짜</span><select id="ap-target">${tOpts}<option value="__new" ${tg === "__new" ? "selected" : ""}>＋ 새 날짜…</option></select></label>
-          ${tg === "__new" ? `<label class="mp"><span>새 날짜</span><input type="date" id="ap-newdate" value="${esc(a.newdate || todayISO())}"></label>` : ""}
+          ${tg === "__new" ? `<label class="mp"><span>새 날짜</span><input type="date" id="ap-newdate" value="${esc(a.newdate || todayISO())}"></label>${timeField("ap-newtime", a.newtime)}` : ""}
         </div>
         <p class="sum"><b>${sel.length}명</b> 선택 <span class="sub">(남 ${addM} · 여 ${addF})</span>${sel.length ? ` → 배정 후 <b>남 ${baseM + addM} · 여 ${baseF + addF}</b>` : ""}</p>
         <div class="toolbar"><span class="toolbar-l"><button class="btn sm ghost" data-act="appl-all">보이는 대기자 모두 선택</button> <button class="btn sm ghost" data-act="appl-none">선택 해제</button></span>
@@ -511,7 +512,8 @@
       run(async () => {
         const rows = b.rows.map((p) => ({ phone: p.phone, gender: p.gender, name: p.name, age_label: p.age_label, school: p.school, mbti: p.mbti, hobby: p.hobby, number: p.number }));
         const data = im.table.slice(1);
-        const cur = impRoundValue(), rid = im.date ? toRoundId(im.date) : cur === "__new" ? String(im.newdate || todayISO()) : cur;
+        const cur = impRoundValue(), rid = im.date ? mkRound(toRoundId(im.date), im.newtime) : cur === "__new" ? mkRound(im.newdate || todayISO(), im.newtime) : cur;
+        if (!rid) throw new Error("invalid_time");
         const label = roundLabel(rid);
         im.done = await api.admin.import(S.pin, rid, label, rows, im.prune);
         S.round = rid;
@@ -522,9 +524,9 @@
     "appl-none": () => { S.appl.sel = {}; render(); },
     "appl-assign": () => {
       const ids = applFiltered().filter((x) => S.appl.sel[x.id] && !x.assigned_round).map((x) => x.id);
-      const tg = applTarget(), rid = tg === "__new" ? String(S.appl.newdate || todayISO()) : tg;
+      const tg = applTarget(), rid = tg === "__new" ? mkRound(S.appl.newdate || todayISO(), S.appl.newtime) : tg;
       if (!ids.length) return;
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(rid)) return toast("날짜를 골라 주세요.");
+      if (!rid) return toast("날짜 또는 시간 형식을 확인해 주세요. 시간은 19:00 처럼 적어요.");
       run(async () => {
         const r = await api.admin.assign(S.pin, ids, rid, roundLabel(rid));
         S.appl.sel = {}; S.appl.target = rid; S.round = rid;
@@ -591,6 +593,8 @@
     if (e.target.id === "imp-text") S.imp.text = e.target.value;
     if (e.target.id === "imp-newdate") S.imp.newdate = e.target.value;
     if (e.target.id === "ap-newdate") S.appl.newdate = e.target.value;
+    if (e.target.id === "ap-newtime") S.appl.newtime = e.target.value;
+    if (e.target.id === "imp-newtime") S.imp.newtime = e.target.value;
     if (e.target.id && e.target.id.startsWith("add-") && e.target.id !== "add-details") {
       const k = e.target.id.slice(4);
       if (k === "phone") { e.target.value = e.target.value.replace(/\D/g, "").slice(0, 11); }   // '-' 를 입력하거나 붙여넣어도 숫자만 남긴다
@@ -605,8 +609,8 @@
     e.preventDefault();
     if (e.target.id === "f-add") {
       const a = S.add, phone = normPhone(a.phone), name = a.name.trim();
-      const cur = addRoundValue(), rid = a.editing ? S.round : cur === "__new" ? String(a.newdate || todayISO()) : cur;
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(rid)) return toast("날짜를 골라 주세요.");
+      const cur = addRoundValue(), rid = a.editing ? S.round : cur === "__new" ? mkRound(a.newdate || todayISO(), a.newtime) : cur;
+      if (!rid || !isRoundId(rid)) return toast("날짜 또는 시간 형식을 확인해 주세요. 시간은 19:00 처럼 적어요.");
       if (!name) return toast("이름을 적어 주세요.");
       if (!a.gender) return toast("성별을 골라 주세요.");
       if (!/^01\d{8,9}$/.test(phone)) return toast("연락처를 정확히 입력해 주세요.");

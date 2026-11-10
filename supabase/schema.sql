@@ -32,7 +32,7 @@ on conflict (id) do nothing;
 
 -- 회차: 매칭 결과를 열었는지(results_open)를 회차마다 따로 가진다.
 create table if not exists public.rounds (
-  id           text primary key,                        -- 날짜 YYYY-MM-DD (화면에는 11/8 (일) 로 표시)
+  id           text primary key,                        -- 날짜 YYYY-MM-DD, 시간 타임이 있으면 'YYYY-MM-DD HH:MM'
   label        text not null,                           -- 예: 11/8 (일)
   results_open boolean not null default false,
   created_at   timestamptz not null default now()
@@ -518,7 +518,7 @@ declare
 begin
   perform public._check_admin(p_pin);
   if nullif(trim(p_round), '') is null then raise exception 'round_required'; end if;
-  if trim(p_round) !~ '^\d{4}-\d{2}-\d{2}$' then raise exception 'invalid_round'; end if;
+  if trim(p_round) !~ '^\d{4}-\d{2}-\d{2}( \d{2}:\d{2})?$' then raise exception 'invalid_round'; end if;
   if jsonb_typeof(p_rows) <> 'array' then raise exception 'invalid_rows'; end if;
 
   insert into public.rounds (id, label) values (trim(p_round), coalesce(nullif(trim(p_label), ''), trim(p_round)))
@@ -624,7 +624,7 @@ returns jsonb language plpgsql security definer set search_path = public as $$
 declare rows jsonb; n int;
 begin
   perform public._check_admin(p_pin);
-  if trim(coalesce(p_round, '')) !~ '^\d{4}-\d{2}-\d{2}$' then raise exception 'invalid_round'; end if;
+  if trim(coalesce(p_round, '')) !~ '^\d{4}-\d{2}-\d{2}( \d{2}:\d{2})?$' then raise exception 'invalid_round'; end if;
   select coalesce(jsonb_agg(jsonb_build_object(
       'phone', a.phone, 'gender', a.gender, 'name', a.name, 'age_label', a.age_label,
       'school', a.school, 'mbti', a.mbti, 'hobby', a.hobby) order by a.created_at), '[]'::jsonb)
