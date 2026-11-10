@@ -30,6 +30,8 @@
     invalid_target: "선택할 수 없는 상대가 포함되어 있어요.",
     result_published: "매칭 결과가 이미 공개되어 선택을 바꿀 수 없어요.",
     not_ready: "아직 매칭 결과가 공개되지 않았어요.",
+    depositor_required: "입금자명을 적어 주세요.",
+    already_requested: "이미 신청했어요. 진행자 확인을 기다려 주세요.",
     invalid_slot: "메모 칸 번호가 올바르지 않아요.",
     bad_pin: "마스터키가 맞지 않아요.",
     round_required: "날짜를 골라 주세요.",
@@ -54,6 +56,7 @@
   /* ───────────── 회차(날짜) ─────────────
    * 회차는 'YYYY-MM-DD'(예: 2026-11-08) 한 가지 형식으로 저장하고, 화면에도 같은 형식으로 보여준다.
    * 연도를 id 에 넣는 이유: 해마다 같은 날짜(예: 11/8)가 겹쳐도 지난 회차의 데이터가 섞이지 않게 하려는 것. */
+  const PRICE = { votes: 3000, contact: 5000 };   // 체험 모드용. 실제 가격은 서버(app_settings)에서 온다
   const ISO_RE = /^(\d{4})-(\d{2})-(\d{2})( \d{2}:\d{2})?$/;   // 'YYYY-MM-DD' 또는 시간 타임이 있는 'YYYY-MM-DD HH:MM'
   const WEEKDAY = ["일", "월", "화", "수", "목", "금", "토"];
   const p2 = (n) => String(n).padStart(2, "0");
@@ -160,7 +163,11 @@
       getMyPicks: () => authed("get_my_picks"),
       submitPicks: (inputs, survey) => authed("submit_picks", { p_inputs: inputs, p_survey: survey }),
       getResult: () => authed("get_result"),
+      requestPaid: (kind, target, depositor) => authed("request_paid", { p_kind: kind, p_target: target || null, p_depositor: depositor }),
+      getPaid: () => authed("get_paid"),
       admin: {
+        paid: (pin, round) => rpc("admin_paid", { p_pin: pin, p_round: round }),
+        paidSet: (pin, id, status) => rpc("admin_paid_set", { p_pin: pin, p_id: id, p_status: status }),
         rounds: (pin) => rpc("admin_rounds", { p_pin: pin }),
         dashboard: (pin, round) => rpc("admin_dashboard", { p_pin: pin, p_round: round }),
         setResults: (pin, round, open) => rpc("admin_set_results", { p_pin: pin, p_round: round, p_open: !!open }),
@@ -298,10 +305,49 @@
         return (s.picks[u.id] || []).map((e, i) => {
           const t = e.target ? s.people.find((x) => x.id === e.target) : null;
           const mutual = !!t && (s.picks[t.id] || []).some((p) => p.target === u.id);
-          return { rank: i + 1, resolved: !!t, input: e.input, number: t ? t.number : null, name: t ? t.name : null, age_label: t ? t.age_label : null, school: t ? t.school : null, mutual, phone: mutual ? t.phone : null };
+          return { rank: i + 1, resolved: !!t, input: e.input, target_id: t ? t.id : null, number: t ? t.number : null, name: t ? t.name : null, age_label: t ? t.age_label : null, school: t ? t.school : null, mutual, phone: mutual ? t.phone : null };
         });
       }),
+      requestPaid: (kind, target, depositor) => op((s) => {
+        const u = me(s);
+        if (!s.rounds[u.round].results_open) fail("not_ready");
+        const dep = String(depositor || "").trim().slice(0, 20);
+        if (!dep) fail("depositor_required");
+        s.paid = s.paid || [];
+        let tid = null;
+        if (kind === "contact") {
+          tid = target;
+          const mutual = (s.picks[tid] || []).some((p) => p.target === u.id);
+          if (!(s.picks[u.id] || []).some((p) => p.target === tid) || mutual) fail("invalid_target");
+        } else if (kind !== "votes") fail("invalid_kind");
+        if (s.paid.some((q) => q.pid === u.id && q.kind === kind && q.target === tid && q.status !== "rejected")) fail("already_requested");
+        const amount = kind === "votes" ? PRICE.votes : PRICE.contact;
+        const id = "q" + s.seq++;
+        s.paid.push({ id, pid: u.id, kind, target: tid, depositor: dep, amount, status: "pending", created: Date.now() });
+        return { id, amount };
+      }),
+      getPaid: () => op((s) => {
+        const u = me(s);
+        if (!s.rounds[u.round].results_open) fail("not_ready");
+        const all = s.paid || [], mine = all.filter((q) => q.pid === u.id);
+        const votes = mine.some((q) => q.kind === "votes" && q.status === "approved")
+          ? s.people.filter((x) => (s.picks[x.id] || []).some((p) => p.target === u.id)).length : null;
+        return {
+          prices: PRICE, pay_info: "체험용 은행 000-0000-0000 (예금주 gyeoL)", votes,
+          items: mine.map((q) => { const t = q.target ? s.people.find((x) => x.id === q.target) : null; return { id: q.id, kind: q.kind, target_id: q.target, target_number: t ? t.number : null, target_name: t ? t.name : null, status: q.status, amount: q.amount }; }),
+          received: all.filter((q) => q.kind === "contact" && q.target === u.id && q.status === "approved").map((q) => { const f = s.people.find((x) => x.id === q.pid); return f ? { number: f.number, name: f.name, age_label: f.age_label, school: f.school, phone: f.phone } : null; }).filter(Boolean),
+        };
+      }),
       admin: {
+        paid: (pin, round) => op((s) => {
+          checkAdmin(pin);
+          return (s.paid || []).map((q) => {
+            const f = s.people.find((x) => x.id === q.pid); if (!f || f.round !== round) return null;
+            const t = q.target ? s.people.find((x) => x.id === q.target) : null;
+            return { id: q.id, kind: q.kind, status: q.status, amount: q.amount, depositor: q.depositor, created_at: new Date(q.created).toISOString(), from_number: f.number, from_name: f.name, from_gender: f.gender, to_number: t ? t.number : null, to_name: t ? t.name : null };
+          }).filter(Boolean).sort((a, b) => (a.status !== "pending") - (b.status !== "pending") || (a.created_at < b.created_at ? -1 : 1));
+        }),
+        paidSet: (pin, id, status) => op((s) => { checkAdmin(pin); const q = (s.paid || []).find((x) => x.id === id); if (q) q.status = status; }),
         rounds: (pin) => op((s) => {
           checkAdmin(pin);
           return Object.keys(s.rounds).sort().map((id) => ({ id, label: s.rounds[id].label, results_open: !!s.rounds[id].results_open, count: s.people.filter((p) => p.round === id).length, male: s.people.filter((p) => p.round === id && p.gender === "M").length, female: s.people.filter((p) => p.round === id && p.gender === "F").length }));

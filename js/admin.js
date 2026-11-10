@@ -6,7 +6,7 @@
   const $app = document.getElementById("app");
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
-  const S = { pin: "", data: null, applicants: [], appl: { date: "", gender: "", showAssigned: false, sel: {}, target: "", newdate: "", newtime: "" }, error: "", confirm: "", busy: false, round: "", rounds: [], tab: "picks", open: {}, openPick: {}, pickEdit: {}, onlyBad: false,
+  const S = { pin: "", data: null, paid: [], applicants: [], appl: { date: "", gender: "", showAssigned: false, sel: {}, target: "", newdate: "", newtime: "" }, error: "", confirm: "", busy: false, round: "", rounds: [], tab: "picks", open: {}, openPick: {}, pickEdit: {}, onlyBad: false,
     add: { open: false, editing: false, round: "", newdate: "", newtime: "", name: "", gender: "", phone: "", number: "", age: "", school: "", mbti: "", hobby: "" },
     imp: { dest: "applicants", text: "", fileName: "", table: null, map: {}, date: "", round: "", newdate: "", newtime: "", numberedOnly: false, onlyDate: true, prune: false, done: null, error: "" } };
   try { S.pin = sessionStorage.getItem("rn_admin_pin") || ""; S.round = sessionStorage.getItem("rn_admin_round") || ""; S.tab = sessionStorage.getItem("rn_admin_tab") || "picks"; } catch (e) { /* 저장소 사용 불가 */ }
@@ -27,6 +27,7 @@
       S.round = ids.find((i) => roundDate(i) === t) || ids.find((i) => roundDate(i) > t) || ids[ids.length - 1] || "";
     }
     S.applicants = await api.admin.applicants(S.pin);
+    S.paid = S.round ? await api.admin.paid(S.pin, S.round) : [];
     S.data = S.round ? await api.admin.dashboard(S.pin, S.round) : { round: null, results_open: false, participants: [], matches: [], surveys: [] };
     try { sessionStorage.setItem("rn_admin_round", S.round); sessionStorage.setItem("rn_admin_tab", S.tab); } catch (e) { /* 무시 */ }
   }
@@ -289,6 +290,21 @@
     ["survey", "설문 결과", ico('<path d="M4.5 20V10M10 20V4.5M15.5 20v-7M21 20H3"/>')],
   ];
 
+  // [유료 신청] 입금을 확인하고 승인하면 참가자 화면에 득표수/연락처가 열린다
+  function paidPanel() {
+    const list = S.paid, wait = list.filter((q) => q.status === "pending");
+    if (!list.length) return `<section class="panel"><h2>유료 신청 <span class="sub">득표수 확인 · 연락처 전달</span></h2><p class="sub" style="font-size:13px">결과를 공개한 뒤 참가자가 신청하면 여기에 입금자명과 금액이 나와요. 입금을 확인하고 승인해 주세요.</p></section>`;
+    const won = (n) => Number(n).toLocaleString("ko-KR") + "원";
+    const tagFor = (q) => `<span class="tag ${q.status === "approved" ? "y" : q.status === "rejected" ? "" : "n"}">${q.status === "approved" ? "승인" : q.status === "rejected" ? "거절" : "대기"}</span>`;
+    return `<section class="panel"><h2>유료 신청 <span class="sub">${wait.length ? `대기 <b class="badtxt">${wait.length}건</b>` : "대기 없음"} · 입금 확인 후 승인</span></h2>
+      <div class="rows">${list.map((q) => `<div class="row paidrow ${q.status === "pending" ? "warn" : ""}">
+        <span class="rm"><b>${q.from_gender === "M" ? "남" : "여"} ${q.from_number}번 ${esc(q.from_name)}</b>
+          <small>${q.kind === "votes" ? "득표수 확인" : `연락처 전달 → ${q.to_number}번 ${esc(q.to_name || "")}`} · ${won(q.amount)} · 입금자 <b>${esc(q.depositor)}</b></small></span>
+        <span class="pbtns">${tagFor(q)}
+          ${q.status !== "approved" ? `<button class="btn sm" data-act="paid-set" data-id="${q.id}" data-v="approved">승인</button>` : `<button class="link" data-act="paid-set" data-id="${q.id}" data-v="pending">승인 취소</button>`}
+          ${q.status === "pending" ? `<button class="link" data-act="paid-set" data-id="${q.id}" data-v="rejected">거절</button>` : ""}</span></div>`).join("")}</div></section>`;
+  }
+
   // [최종 선택 현황] 결과 공개 스위치 + 선택 현황·조정 + 매칭 쌍
   function tabPicks(d, rnd) {
     const ppl = d.participants, submitted = ppl.filter((p) => p.submitted).length, bad = (d.picks || []).filter((x) => !x.target_id).length;
@@ -296,6 +312,7 @@
         <p class="note">공개하면 참가자 화면에 <b>매칭 결과와 연락처</b>가 열리고, 이후엔 선택을 바꿀 수 없어요. 공개 전에 <b>확인 필요 0건</b>인지 확인하세요.</p>
         <div class="resultbar"><span class="tag ${d.results_open ? "y" : "n"}">${d.results_open ? "결과 공개 중" : "아직 비공개"}</span><span class="sub" style="font-size:13px">제출 ${submitted} / ${ppl.length}명 · 매칭 ${d.matches.length}쌍${bad ? ` · <b class="badtxt">확인 필요 ${bad}건</b>` : ""}</span>
           <button class="btn ${d.results_open ? "ghost" : ""}" style="width:auto" data-act="results" ${S.busy ? "disabled" : ""}>${d.results_open ? (S.confirm === "res-off" ? "한 번 더 눌러 공개 취소" : "공개 취소 (다시 제출 받기)") : S.confirm === "res-on" ? "한 번 더 눌러 공개" : "매칭 결과 공개하기"}</button></div></section>
+      ${paidPanel()}
       ${picksPanel(d)}
       <section style="display:grid;gap:10px"><div class="toolbar"><div class="sec-title"><h2>매칭된 쌍</h2><span>${d.matches.length}쌍</span></div><button class="btn sm ghost" data-act="csv-match">매칭 CSV</button></div>
         ${d.matches.length ? `<div class="tbl-wrap"><table><thead><tr><th>남</th><th>여</th></tr></thead><tbody>${d.matches.map((m) => `<tr><td>${m.m_number}번 ${esc(m.m_name)}</td><td>${m.f_number}번 ${esc(m.f_name)}</td></tr>`).join("")}</tbody></table></div>` : `<div class="empty"><b>매칭된 쌍이 아직 없어요</b><p>참가자가 최종 선택을 제출하면 서로 선택한 쌍이 여기에 보여요.</p></div>`}
@@ -390,7 +407,7 @@
       ${api.mode === "demo" ? `<div class="demo-bar">체험 모드 · 참가자 화면과 같은 브라우저 데이터를 사용해요. <a href="index.html?demo">참가자 화면</a></div>` : ""}`;
     // 날짜(회차)가 하나도 없으면 '참가자 추가' 탭만 쓸 수 있다
     const tab = rnd || S.tab === "applicants" ? S.tab : "add", badCount = (d.picks || []).filter((x) => !x.target_id).length;
-    const nav = `<nav class="tabs" aria-label="진행자 메뉴">${TABS.map(([id, label, icon]) => `<button data-act="tab" data-v="${id}" class="${tab === id ? "on" : ""}" ${tab === id ? 'aria-current="page"' : ""} ${!rnd && id !== "add" && id !== "applicants" ? "disabled" : ""}><span class="ico">${icon}</span>${label}${id === "picks" && badCount ? `<em class="bdg" aria-label="확인 필요 ${badCount}건">${badCount}</em>` : ""}</button>`).join("")}</nav>`;
+    const nav = `<nav class="tabs" aria-label="진행자 메뉴">${TABS.map(([id, label, icon]) => `<button data-act="tab" data-v="${id}" class="${tab === id ? "on" : ""}" ${tab === id ? 'aria-current="page"' : ""} ${!rnd && id !== "add" && id !== "applicants" ? "disabled" : ""}><span class="ico">${icon}</span>${label}${id === "picks" && badCount + S.paid.filter((q) => q.status === "pending").length ? `<em class="bdg" aria-label="확인 필요 ${badCount + S.paid.filter((q) => q.status === "pending").length}건">${badCount + S.paid.filter((q) => q.status === "pending").length}</em>` : ""}</button>`).join("")}</nav>`;
     let body;
     if (tab === "applicants") body = tabApplicants();
     else if (!rnd) body = `<div class="empty"><b>아직 날짜(회차)가 없어요</b><p>날짜를 골라 참가자를 추가하거나 구글 시트를 가져오면 그 날짜 회차가 만들어져요.</p></div>${importPanel(d)}${addPanel()}${entryPanel()}`;
@@ -543,6 +560,7 @@
       if (S.confirm !== key) return askConfirm(key);
       run(async () => { await api.admin.applicantRemove(S.pin, t.dataset.id); toast(t.dataset.name + " 신청자를 삭제했어요."); });
     },
+    "paid-set": (t) => run(async () => { await api.admin.paidSet(S.pin, t.dataset.id, t.dataset.v); toast(t.dataset.v === "approved" ? "승인했어요. 참가자 화면에 바로 열려요." : t.dataset.v === "rejected" ? "거절했어요." : "대기로 되돌렸어요."); }),
     "csv-match": () => {
       const rows = [["남 번호", "남 이름", "여 번호", "여 이름"]];
       S.data.matches.forEach((m) => rows.push([m.m_number, m.m_name, m.f_number, m.f_name]));

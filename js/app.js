@@ -21,7 +21,7 @@
 
   const S = {
     ready: false, me: null, choices: null, tab: "mine",
-    notes: {}, mine: { picks: [], submitted: false, answers: {} }, resultsOpen: false, result: null,
+    notes: {}, mine: { picks: [], submitted: false, answers: {} }, resultsOpen: false, result: null, paid: null, payForm: null,
     draftInputs: ["", "", ""], draftAnswers: {}, editSel: false,
     busy: false, error: "", draft: null,
     talk: { deck: "light", lock: false, dealing: false, d: { light: null, deep: null } },
@@ -47,6 +47,7 @@
     S.draftAnswers = JSON.parse(JSON.stringify(S.mine.answers || {}));
     S.resultsOpen = !!(await api.getStatus()).results_open;
     S.result = S.resultsOpen ? await api.getResult() : null;
+    S.paid = S.resultsOpen ? await api.getPaid() : null;
   }
   async function refreshAll() {
     S.me = await api.getMe();
@@ -58,13 +59,16 @@
     try {
       const open = !!(await api.getStatus()).results_open;
       if (open && S.resultsOpen) {   // 공개된 뒤 진행자가 선택을 조정하면 결과도 바로 바뀐다
-        const r = await api.getResult();
-        if (JSON.stringify(r) !== JSON.stringify(S.result)) { S.result = r; render(); }
+        const r = await api.getResult(), pd = await api.getPaid();
+        const changed = JSON.stringify(r) !== JSON.stringify(S.result) || JSON.stringify(pd) !== JSON.stringify(S.paid);
+        S.result = r; S.paid = pd;
+        if (changed && !S.payForm) render();   // 입금자명을 적는 중에는 화면을 다시 그리지 않는다
         return;
       }
       if (open === S.resultsOpen) return;
       S.resultsOpen = open;
       S.result = open ? await api.getResult() : null;
+      S.paid = open ? await api.getPaid() : null;
       if (open) { S.tab = "pick"; toast("매칭 결과가 공개됐어요."); }
       render();
     } catch (e) { /* 일시적인 네트워크 오류는 무시 */ }
@@ -190,7 +194,54 @@
         </article>` : `<article class="res">
           <div class="who"><b>${r.number}번</b><span>${esc(r.name)}</span><span class="badge">연결 안 됨</span></div>
           <p class="gentle">이번에는 서로의 선택이 맞지 않았어요. 만나 주셔서 고마워요.</p></article>`).join("")}
-      ${hits === 0 && res.length ? `<p class="note">연결되지 않아도 괜찮아요. 오늘 만난 시간은 그대로 남아요.</p>` : ""}`;
+      ${hits === 0 && res.length ? `<p class="note">연결되지 않아도 괜찮아요. 오늘 만난 시간은 그대로 남아요.</p>` : ""}
+      ${receivedView()}${paidView()}`;
+  }
+
+
+  /* ───────── 유료 서비스: 득표수 확인 · 연락처 전달 ───────── */
+  const won = (n) => Number(n).toLocaleString("ko-KR") + "원";
+  function receivedView() {
+    const rec = (S.paid && S.paid.received) || [];
+    if (!rec.length) return "";
+    return `<div class="sec-title"><h2>나에게 연락처를 전달한 분</h2><span>${rec.length}명</span></div>
+      ${rec.map((r) => `<article class="res hit"><div class="who"><b>${r.number}번</b><span>${esc(r.name)}</span><span class="badge">연락처 전달</span></div>
+        <p>${esc([r.age_label, splitSchool(r.school).filter(Boolean).join(" ")].filter(Boolean).join(" · "))}</p>
+        <div class="phone">${esc(fmtPhone(r.phone))}</div>
+        <p class="gentle">연락은 하지 않으셔도 괜찮아요. 연락할지는 자유롭게 정해요.</p>
+        <div class="acts"><button class="btn sm ghost" data-act="copy" data-v="${esc(r.phone)}">번호 복사</button><a class="btn sm ghost" style="text-decoration:none" href="tel:${esc(r.phone)}">전화 걸기</a></div></article>`).join("")}`;
+  }
+  function paidState(q, openAttrs, label, price) {
+    if (q && q.status === "pending") return `<span class="tag n">입금 확인 대기</span>`;
+    if (q && q.status === "approved") return null;
+    return `<button class="btn sm" ${openAttrs}>${q && q.status === "rejected" ? "다시 신청" : label} · ${won(price)}</button>`;
+  }
+  function paidView() {
+    const P = S.paid;
+    if (!P) return "";
+    const live = (kind, tid) => P.items.filter((q) => q.kind === kind && (kind === "votes" || q.target_id === tid)).pop();
+    const vq = live("votes");
+    const voteBody = vq && vq.status === "approved"
+      ? `<p class="votes"><b>${P.votes === null || P.votes === undefined ? 0 : P.votes}명</b>이 나를 선택했어요.</p><p class="sub" style="font-size:12.5px">누가 골랐는지, 몇 순위인지는 알려지지 않아요. 진행자가 아직 연결하지 못한 선택은 포함되지 않을 수 있어요.</p>`
+      : `<p class="sub" style="font-size:13px">나를 선택한 사람이 몇 명인지 알려 드려요. 신원과 순위는 알려지지 않아요.</p>${vq && vq.status === "rejected" ? `<p class="err">확인되지 않았어요. 입금자명이나 입금 여부를 진행자에게 문의해 주세요.</p>` : ""}${paidState(vq, `data-act="pay-open" data-kind="votes"`, "득표수 확인", P.prices.votes) || ""}`;
+    const targets = (S.result || []).filter((r) => r.resolved && !r.mutual && r.target_id);
+    const contactRows = targets.map((r) => {
+      const q = live("contact", r.target_id);
+      const right = q && q.status === "approved" ? `<span class="tag y">전달 완료</span>` : paidState(q, `data-act="pay-open" data-kind="contact" data-target="${esc(r.target_id)}"`, "연락처 전달", P.prices.contact);
+      return `<div class="row cr"><span class="rn">${r.number}</span><span class="rm"><b>${esc(r.name)}</b>${q && q.status === "rejected" ? `<small>확인되지 않았어요. 진행자에게 문의해 주세요.</small>` : ""}</span><span>${right}</span></div>`;
+    }).join("");
+    const f = S.payForm;
+    const form = f ? `<section class="panel payform"><h2>${f.kind === "votes" ? "득표수 확인" : "연락처 전달"} 신청 · ${won(f.kind === "votes" ? P.prices.votes : P.prices.contact)}</h2>
+        <p class="sub" style="font-size:13px">${f.kind === "contact" ? `<b>${esc(f.name || "")}</b> 님에게 내 이름과 연락처가 전달돼요. ` : ""}아래 계좌로 입금한 뒤 <b>입금자명</b>을 적어 신청하면, 진행자가 확인하고 열어 드려요.</p>
+        <p class="payinfo">${P.pay_info ? esc(P.pay_info) : "입금 계좌는 진행자에게 문의해 주세요."}</p>
+        <div class="pkfield"><label for="depositor">입금자명</label><input id="depositor" type="text" data-bind="depositor" maxlength="20" placeholder="입금하신 분 이름" value="${esc(f.depositor)}" autocomplete="off"></div>
+        ${S.error ? `<p class="err">${esc(S.error)}</p>` : ""}
+        <div class="toolbar"><button class="btn ghost sm" data-act="pay-cancel">취소</button><button class="btn sm" data-act="pay-submit" ${S.busy ? "disabled" : ""}>신청하기</button></div></section>` : "";
+    return `<div class="sec-title"><h2>추가 서비스</h2><span>유료 · 계좌이체</span></div>
+      <section class="panel"><h2>득표수 확인</h2>${voteBody}</section>
+      ${targets.length ? `<section class="panel"><h2>연락처 전달</h2><p class="sub" style="font-size:13px">서로 선택하지 못한 분에게도 내 이름과 연락처를 전달할 수 있어요. 받은 분은 연락할지 자유롭게 정해요. 1명당 ${won(P.prices.contact)}.</p><div class="rows">${contactRows}</div></section>` : ""}
+      ${form}
+      <p class="note">입금 확인은 진행자가 직접 해요. 승인되면 이 화면에 바로 나타나요.</p>`;
   }
 
   /* ───────── 뷰: 대화 카드 (덱) ───────── */
@@ -329,7 +380,7 @@
       guarded(async () => { await finishLogin(await api.login(phone, round)); });
     },
     backlogin: () => { S.choices = null; S.error = ""; render(); },
-    logout: async () => { await flushAll(); await api.logout(); Object.assign(S, { me: null, choices: null, tab: "mine", notes: {}, result: null, resultsOpen: false, editSel: false }); render(); },
+    logout: async () => { await flushAll(); await api.logout(); Object.assign(S, { me: null, choices: null, tab: "mine", notes: {}, result: null, paid: null, payForm: null, resultsOpen: false, editSel: false }); render(); },
     ans: (t) => {
       const q = SURVEY.find((x) => x.id === t.dataset.q);
       const raw = t.dataset.v, v = q.type === "scale" ? Number(raw) : raw;
@@ -361,6 +412,21 @@
         S.mine = await api.getMyPicks(); S.editSel = false; window.scrollTo(0, 0);
         const bad = res.picks.filter((p) => !p.resolved).length;
         toast(bad ? "제출했어요. 정확히 맞지 않은 " + bad + "건은 진행자가 확인해요." : "제출했어요.");
+      });
+    },
+    "pay-open": (t) => {
+      const k = t.dataset.kind, r = (S.result || []).find((x) => x.target_id === t.dataset.target);
+      S.payForm = { kind: k, target: t.dataset.target || null, name: r ? r.name : "", depositor: "" }; S.error = ""; render();
+      document.getElementById("depositor")?.focus();
+    },
+    "pay-cancel": () => { S.payForm = null; S.error = ""; render(); },
+    "pay-submit": () => {
+      const f = S.payForm;
+      if (!f || !f.depositor.trim()) { S.error = "입금자명을 적어 주세요."; render(); return; }
+      guarded(async () => {
+        await api.requestPaid(f.kind, f.target, f.depositor.trim());
+        S.paid = await api.getPaid(); S.payForm = null;
+        toast("신청했어요. 진행자가 입금을 확인하면 열려요.");
       });
     },
     copy: async (t) => {
@@ -398,6 +464,7 @@
       const c = document.getElementById("memocount"); if (c) c.textContent = filled + " / " + MEMO_SLOTS + "번 기록";
     }
     if (b === "ans") S.draftAnswers[e.target.dataset.q] = e.target.value;
+    if (b === "depositor" && S.payForm) S.payForm.depositor = e.target.value;
     if (b === "pick") S.draftInputs[Number(e.target.dataset.i)] = e.target.value;
   });
   // 메모 칸에서 손을 떼는 순간(다른 칸·탭 누르기) 바로 저장해서, 앱을 바로 닫아도 남도록 한다

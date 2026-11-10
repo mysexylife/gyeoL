@@ -93,6 +93,28 @@ create table if not exists public.applicants (
 );
 alter table public.applicants enable row level security;
 
+-- 유료 서비스 가격·입금 안내(진행자가 SQL 로 바꿀 수 있음): update app_settings set pay_info = '카카오뱅크 0000-00-0000 홍길동' where id = 1;
+alter table public.app_settings add column if not exists price_votes   int  not null default 3000;
+alter table public.app_settings add column if not exists price_contact int  not null default 5000;
+alter table public.app_settings add column if not exists pay_info      text not null default '';
+
+-- 유료 신청: kind 'votes' = 나를 선택한 사람 수 확인, 'contact' = 매칭되지 않은 상대에게 내 연락처 전달.
+-- 입금은 앱 밖(계좌이체)에서 하고, 진행자가 확인해 승인한다.
+create table if not exists public.paid_requests (
+  id             uuid primary key default gen_random_uuid(),
+  participant_id uuid not null references public.participants(id) on delete cascade,
+  kind           text not null check (kind in ('votes','contact')),
+  target_id      uuid references public.participants(id) on delete cascade,
+  depositor      text not null,
+  amount         int  not null,
+  status         text not null default 'pending' check (status in ('pending','approved','rejected')),
+  created_at     timestamptz not null default now(),
+  decided_at     timestamptz
+);
+create unique index if not exists paid_votes_once on public.paid_requests (participant_id) where kind = 'votes' and status <> 'rejected';
+create unique index if not exists paid_contact_once on public.paid_requests (participant_id, target_id) where kind = 'contact' and status <> 'rejected';
+alter table public.paid_requests enable row level security;
+
 -- 로그인 상태(브라우저에 저장되는 임의 토큰)
 create table if not exists public.sessions (
   token          uuid primary key default gen_random_uuid(),
@@ -353,7 +375,7 @@ begin
   return (
     select coalesce(jsonb_agg(s.x order by (s.x->>'rank')::int), '[]'::jsonb) from (
       select jsonb_build_object(
-        'rank', pk.rank, 'resolved', pk.target_id is not null, 'input', pk.input_text,
+        'rank', pk.rank, 'resolved', pk.target_id is not null, 'input', pk.input_text, 'target_id', pk.target_id,
         'number', t.number, 'name', t.name, 'age_label', t.age_label, 'school', t.school,
         'mutual', m.mutual,
         'phone', case when m.mutual then t.phone end) as x
@@ -654,4 +676,91 @@ returns void language plpgsql security definer set search_path = public as $$
 begin
   perform public._check_admin(p_pin);
   delete from public.applicants where id = p_id;
+end $$;
+
+
+-- ───────────────────────── 유료 서비스 (참가자) ─────────────────────────
+
+-- 신청: 입금자명을 적어 신청하면 진행자가 입금을 확인한 뒤 승인한다. 결과가 공개된 뒤에만 신청할 수 있다.
+create or replace function public.request_paid(p_token uuid, p_kind text, p_target uuid, p_depositor text)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare me public.participants; ro boolean; dep text := left(trim(coalesce(p_depositor, '')), 20); amt int; rid uuid;
+begin
+  select * into me from public.participants where id = public._me(p_token);
+  select results_open into ro from public.rounds where id = me.round_id;
+  if not coalesce(ro, false) then raise exception 'not_ready'; end if;
+  if dep = '' then raise exception 'depositor_required'; end if;
+  if p_kind = 'votes' then
+    select price_votes into amt from public.app_settings where id = 1;
+    p_target := null;
+  elsif p_kind = 'contact' then
+    select price_contact into amt from public.app_settings where id = 1;
+    -- 내가 선택했고 서로 선택하지 않은 상대에게만 보낼 수 있다
+    if not exists (select 1 from public.picks pk where pk.participant_id = me.id and pk.target_id = p_target)
+       or exists (select 1 from public.picks b where b.participant_id = p_target and b.target_id = me.id) then
+      raise exception 'invalid_target';
+    end if;
+  else
+    raise exception 'invalid_kind';
+  end if;
+  begin
+    insert into public.paid_requests (participant_id, kind, target_id, depositor, amount)
+    values (me.id, p_kind, p_target, dep, amt) returning id into rid;
+  exception when unique_violation then
+    raise exception 'already_requested';
+  end;
+  return jsonb_build_object('id', rid, 'amount', amt);
+end $$;
+
+-- 내 신청 현황, 승인된 득표수, 나에게 전달된 연락처
+create or replace function public.get_paid(p_token uuid)
+returns jsonb language plpgsql stable security definer set search_path = public as $$
+declare me public.participants; ro boolean; st public.app_settings; v int;
+begin
+  select * into me from public.participants where id = public._me(p_token);
+  select results_open into ro from public.rounds where id = me.round_id;
+  if not coalesce(ro, false) then raise exception 'not_ready'; end if;
+  select * into st from public.app_settings where id = 1;
+  if exists (select 1 from public.paid_requests where participant_id = me.id and kind = 'votes' and status = 'approved') then
+    select count(distinct pk.participant_id) into v from public.picks pk where pk.target_id = me.id;
+  end if;
+  return jsonb_build_object(
+    'prices', jsonb_build_object('votes', st.price_votes, 'contact', st.price_contact),
+    'pay_info', st.pay_info,
+    'votes', v,
+    'items', coalesce((
+      select jsonb_agg(jsonb_build_object('id', q.id, 'kind', q.kind, 'target_id', q.target_id,
+        'target_number', t.number, 'target_name', t.name, 'status', q.status, 'amount', q.amount) order by q.created_at)
+      from public.paid_requests q left join public.participants t on t.id = q.target_id
+      where q.participant_id = me.id), '[]'::jsonb),
+    'received', coalesce((
+      select jsonb_agg(jsonb_build_object('number', f.number, 'name', f.name, 'age_label', f.age_label,
+        'school', f.school, 'phone', f.phone) order by q.decided_at)
+      from public.paid_requests q join public.participants f on f.id = q.participant_id
+      where q.target_id = me.id and q.kind = 'contact' and q.status = 'approved'), '[]'::jsonb));
+end $$;
+
+-- ───────────────────────── 유료 서비스 (진행자) ─────────────────────────
+
+create or replace function public.admin_paid(p_pin text, p_round text)
+returns jsonb language plpgsql security definer set search_path = public as $$
+begin
+  perform public._check_admin(p_pin);
+  return coalesce((
+    select jsonb_agg(jsonb_build_object(
+      'id', q.id, 'kind', q.kind, 'status', q.status, 'amount', q.amount, 'depositor', q.depositor, 'created_at', q.created_at,
+      'from_number', f.number, 'from_name', f.name, 'from_gender', f.gender,
+      'to_number', t.number, 'to_name', t.name) order by (q.status <> 'pending'), q.created_at)
+    from public.paid_requests q
+    join public.participants f on f.id = q.participant_id
+    left join public.participants t on t.id = q.target_id
+    where f.round_id = p_round), '[]'::jsonb);
+end $$;
+
+create or replace function public.admin_paid_set(p_pin text, p_id uuid, p_status text)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  perform public._check_admin(p_pin);
+  if p_status not in ('pending','approved','rejected') then raise exception 'invalid_status'; end if;
+  update public.paid_requests set status = p_status, decided_at = case when p_status = 'pending' then null else now() end where id = p_id;
 end $$;

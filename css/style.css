@@ -576,3 +576,12 @@ button.brand { background: none; border: 0; padding: 4px 0; cursor: pointer; -we
 .admin-main ~ .tabs button { font-size: 12px; }
 #ap-target { width: 100%; }
 .apmain .pnm { text-align: left; }
+
+/* 유료 서비스 */
+.votes { font-size: 18px; margin: 4px 0; }
+.votes b { font: 300 30px/1 "Jost", sans-serif; color: var(--accent); }
+.payinfo { background: var(--bg); border: 1px dashed var(--line); border-radius: 10px; padding: 10px 12px; font-weight: 600; word-break: keep-all; }
+.payform { border-color: var(--accent); }
+.paidrow { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.paidrow .pbtns { display: flex; align-items: center; gap: 8px; }
+.rows .row.cr { grid-template-columns: 34px minmax(0, 1fr) auto; }
