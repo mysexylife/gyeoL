@@ -47,10 +47,11 @@
     mbti:   { re: /mbti/i },
     hobby:  { re: /취미|hobby/i },
     date:   { re: /날짜|회차/ },
+    photo:  { re: /사진|photo/i, bypass: true },   // 신청자 대기 명단에서만 쓴다(진행자만 보는 링크)
   };
   const FIELD_LABEL = {
     phone: "연락처 *", name: "이름 *", gender: "성별 *", number: "현장 번호", age: "나이",
-    school: "대학·학과", mbti: "MBTI", hobby: "취미", date: "날짜(회차)",
+    school: "대학·학과", mbti: "MBTI", hobby: "취미", date: "날짜(회차)", photo: "사진 링크",
   };
 
   // headers: 첫 줄, data: 나머지 줄.  반환: { phone: 열번호 또는 -1, ... }
@@ -61,7 +62,7 @@
       const rule = RULES[f];
       map[f] = headers.findIndex((h, i) => {
         h = String(h || "");
-        return rule.re.test(h) && !(rule.not && rule.not.test(h)) && !GLOBAL_NOT.test(h) && hasData(i);
+        return rule.re.test(h) && !(rule.not && rule.not.test(h)) && (rule.bypass || !GLOBAL_NOT.test(h)) && hasData(i);
       });
     });
     return map;
@@ -155,6 +156,12 @@
         mbti,
         hobby: cellOf(r, map.hobby).replace(/\s*\n\s*/g, ", "),
       });
+      if (opts.applicant) {   // 신청자 대기 명단: 신청한 날짜(선호일)와 사진 링크도 담는다
+        const last = out[out.length - 1], tk = dateTokens(cellOf(r, map.date));
+        last.pref_date = tk.length === 1 && root.RN ? root.RN.toRoundId(tk[0]) : "";
+        const ph = cellOf(r, map.photo);
+        last.photo_url = /^https?:\/\//i.test(ph) ? ph : "";
+      }
     });
 
     // 같은 연락처가 두 번 나오면 나중 행을 쓴다

@@ -565,3 +565,14 @@ button.brand { background: none; border: 0; padding: 4px 0; cursor: pointer; -we
 .wrap { padding-bottom: 132px; }
 .admin-main { padding-bottom: 136px; }
 #toast { bottom: calc(112px + env(safe-area-inset-bottom, 0px)); }
+
+/* 신청자 대기 명단 */
+.pmain.apmain { grid-template-columns: 30px minmax(0, 1fr) 30px auto 36px; }
+.apck { display: grid; place-items: center; width: 30px; height: 40px; cursor: pointer; }
+.apck input { width: 20px; height: 20px; accent-color: var(--accent); }
+.prow.done .pnm, .prow.done .pg { opacity: .6; }
+.toolbar-l { display: flex; gap: 8px; flex-wrap: wrap; }
+.admin-main ~ .tabs { grid-template-columns: repeat(5, 1fr); }
+.admin-main ~ .tabs button { font-size: 12px; }
+#ap-target { width: 100%; }
+.apmain .pnm { text-align: left; }

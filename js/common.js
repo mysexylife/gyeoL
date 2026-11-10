@@ -155,6 +155,11 @@
         remove: (pin, id) => rpc("admin_remove", { p_pin: pin, p_id: id }),
         reset: (pin, round) => rpc("admin_reset", { p_pin: pin, p_round: round }),
         import: (pin, round, label, rows, prune) => rpc("admin_import", { p_pin: pin, p_round: round, p_label: label, p_rows: rows, p_prune: !!prune }),
+        applicants: (pin) => rpc("admin_applicants", { p_pin: pin }),
+        applicantImport: (pin, rows) => rpc("admin_applicant_import", { p_pin: pin, p_rows: rows }),
+        assign: (pin, ids, round, label) => rpc("admin_assign", { p_pin: pin, p_ids: ids, p_round: round, p_label: label }),
+        unassign: (pin, id) => rpc("admin_unassign", { p_pin: pin, p_id: id }),
+        applicantRemove: (pin, id) => rpc("admin_applicant_remove", { p_pin: pin, p_id: id }),
       },
     };
   }
@@ -285,7 +290,7 @@
       admin: {
         rounds: (pin) => op((s) => {
           checkAdmin(pin);
-          return Object.keys(s.rounds).sort().map((id) => ({ id, label: s.rounds[id].label, results_open: !!s.rounds[id].results_open, count: s.people.filter((p) => p.round === id).length }));
+          return Object.keys(s.rounds).sort().map((id) => ({ id, label: s.rounds[id].label, results_open: !!s.rounds[id].results_open, count: s.people.filter((p) => p.round === id).length, male: s.people.filter((p) => p.round === id && p.gender === "M").length, female: s.people.filter((p) => p.round === id && p.gender === "F").length }));
         }),
         dashboard: (pin, round) => op((s) => {
           checkAdmin(pin);
@@ -329,17 +334,62 @@
         }),
         remove: (pin, id) => op((s) => {
           checkAdmin(pin);
+          const gp = s.people.find((u) => u.id === id);
+          if (gp) (s.applicants || []).forEach((a) => { if (a.phone === gp.phone && a.assigned_round === gp.round) a.assigned_round = null; });
           s.people = s.people.filter((u) => u.id !== id); delete s.picks[id]; delete s.surveys[id]; delete s.notes[id];
           if (s.session === id) s.session = null;
         }),
         reset: (pin, round) => op((s) => {
           checkAdmin(pin);
+          (s.applicants || []).forEach((a) => { if (a.assigned_round === round) a.assigned_round = null; });
           const gone = s.people.filter((p) => p.round === round).map((p) => p.id);
           s.people = s.people.filter((p) => p.round !== round);
           gone.forEach((id) => { delete s.picks[id]; delete s.surveys[id]; delete s.notes[id]; });
           if (gone.includes(s.session)) s.session = null;
           if (s.rounds[round]) s.rounds[round].results_open = false;
         }),
+        applicants: (pin) => op((s) => { checkAdmin(pin); return (s.applicants || []).map((a) => Object.assign({}, a)); }),
+        applicantImport: (pin, rows) => op((s) => {
+          checkAdmin(pin);
+          s.applicants = s.applicants || [];
+          let ins = 0, upd = 0, skipped = 0;
+          rows.forEach((r) => {
+            const ph = normPhone(r.phone), g = r.gender, nm = String(r.name || "").trim();
+            if (!ph || !nm || !["M", "F"].includes(g)) { skipped++; return; }
+            const pd = ISO_RE.test(String(r.pref_date || "")) ? r.pref_date : null;
+            const pu = /^https?:\/\//i.test(String(r.photo_url || "")) ? r.photo_url : null;
+            const f = { gender: g, name: nm, age_label: r.age_label || null, school: r.school || null, mbti: (r.mbti || "").toUpperCase() || null, hobby: r.hobby || null };
+            const ex = s.applicants.find((a) => a.phone === ph);
+            if (ex) { Object.assign(ex, f); if (pd) ex.pref_date = pd; if (pu) ex.photo_url = pu; upd++; }
+            else { s.applicants.push(Object.assign({ id: "a" + s.seq++, phone: ph, pref_date: pd, photo_url: pu, assigned_round: null, created_at: new Date().toISOString() }, f)); ins++; }
+          });
+          return { inserted: ins, updated: upd, skipped };
+        }),
+        assign: (pin, ids, round, label) => op((s) => {
+          checkAdmin(pin);
+          round = String(round || "").trim();
+          if (!ISO_RE.test(round)) fail("invalid_round");
+          const list = (s.applicants || []).filter((a) => ids.includes(a.id) && !a.assigned_round);
+          if (!list.length) return { assigned: 0 };
+          if (!s.rounds[round]) s.rounds[round] = { label: label || round, results_open: false };
+          list.forEach((a) => {
+            if (s.people.find((x) => x.round === round && x.phone === a.phone)) { a.assigned_round = round; return; }
+            const taken = new Set(s.people.filter((x) => x.round === round && x.gender === a.gender).map((x) => x.number));
+            let n = 1; while (taken.has(n)) n++;
+            s.people.push({ id: "p" + s.seq++, round, phone: a.phone, number: n, sample: false, loggedIn: false, gender: a.gender, name: a.name, age_label: a.age_label, school: a.school, mbti: a.mbti, hobby: a.hobby });
+            a.assigned_round = round;
+          });
+          return { assigned: list.length };
+        }),
+        unassign: (pin, id) => op((s) => {
+          checkAdmin(pin);
+          const a = (s.applicants || []).find((x) => x.id === id);
+          if (!a || !a.assigned_round) return;
+          const gp = s.people.find((x) => x.round === a.assigned_round && x.phone === a.phone);
+          if (gp) { s.people = s.people.filter((x) => x.id !== gp.id); delete s.picks[gp.id]; delete s.surveys[gp.id]; delete s.notes[gp.id]; if (s.session === gp.id) s.session = null; }
+          a.assigned_round = null;
+        }),
+        applicantRemove: (pin, id) => op((s) => { checkAdmin(pin); s.applicants = (s.applicants || []).filter((a) => a.id !== id); }),
         import: (pin, round, label, rows, prune) => op((s) => {
           checkAdmin(pin);
           if (!String(round || "").trim()) fail("round_required");

@@ -6,9 +6,9 @@
   const $app = document.getElementById("app");
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
-  const S = { pin: "", data: null, error: "", confirm: "", busy: false, round: "", rounds: [], tab: "picks", open: {}, openPick: {}, pickEdit: {}, onlyBad: false,
+  const S = { pin: "", data: null, applicants: [], appl: { date: "", gender: "", showAssigned: false, sel: {}, target: "", newdate: "" }, error: "", confirm: "", busy: false, round: "", rounds: [], tab: "picks", open: {}, openPick: {}, pickEdit: {}, onlyBad: false,
     add: { open: false, editing: false, round: "", newdate: "", name: "", gender: "", phone: "", number: "", age: "", school: "", mbti: "", hobby: "" },
-    imp: { text: "", fileName: "", table: null, map: {}, date: "", round: "", newdate: "", numberedOnly: false, onlyDate: true, prune: false, done: null, error: "" } };
+    imp: { dest: "applicants", text: "", fileName: "", table: null, map: {}, date: "", round: "", newdate: "", numberedOnly: false, onlyDate: true, prune: false, done: null, error: "" } };
   try { S.pin = sessionStorage.getItem("rn_admin_pin") || ""; S.round = sessionStorage.getItem("rn_admin_round") || ""; S.tab = sessionStorage.getItem("rn_admin_tab") || "picks"; } catch (e) { /* 저장소 사용 불가 */ }
 
   let toastTimer;
@@ -26,6 +26,7 @@
       const ids = withData.length ? withData : S.rounds.map((r) => r.id).sort(), t = todayISO();
       S.round = ids.includes(t) ? t : ids.find((i) => i > t) || ids[ids.length - 1] || "";
     }
+    S.applicants = await api.admin.applicants(S.pin);
     S.data = S.round ? await api.admin.dashboard(S.pin, S.round) : { round: null, results_open: false, participants: [], matches: [], surveys: [] };
     try { sessionStorage.setItem("rn_admin_round", S.round); sessionStorage.setItem("rn_admin_tab", S.tab); } catch (e) { /* 무시 */ }
   }
@@ -135,38 +136,41 @@
     if (t) {
       const data = t.slice(1);
       const dates = Roster.dateOptions(data, im.map);
-      if (dates.length && !dates.includes(im.date)) im.date = dates[0];
-      const b = Roster.build(data, im.map, { date: im.date, numberedOnly: im.numberedOnly, onlyThisDate: im.onlyDate });
+      const toApp = im.dest === "applicants";
+      if (toApp) { if (im.date && !dates.includes(im.date)) im.date = ""; }
+      else if (dates.length && !dates.includes(im.date)) im.date = dates[0];
+      const b = Roster.build(data, im.map, { date: im.date, numberedOnly: !toApp && im.numberedOnly, onlyThisDate: im.onlyDate && !!im.date, applicant: toApp });
       im.built = b;
       const sel = (f) => `<label class="mp"><span>${Roster.FIELD_LABEL[f]}</span><select data-field="${f}" id="map-${f}"><option value="-1" ${im.map[f] < 0 ? "selected" : ""}>(사용 안 함)</option>${t[0].map((h, i) => `<option value="${i}" ${im.map[f] === i ? "selected" : ""}>${colName(i)}열 · ${esc(shortHead(h))}</option>`).join("")}</select></label>`;
       const missing = ["phone", "name", "gender"].filter((f) => im.map[f] < 0).map((f) => Roster.FIELD_LABEL[f].replace(" *", ""));
       const errs = [];
       if (missing.length) errs.push("필수 열을 골라 주세요: " + missing.join(", "));
-      if (b.dupNumbers.length) errs.push("같은 성별에 번호가 겹쳐요. 날짜(회차)를 고르거나 시트의 번호를 확인해 주세요. → " + b.dupNumbers.join(" / "));
+      if (!toApp && b.dupNumbers.length) errs.push("같은 성별에 번호가 겹쳐요. 날짜(회차)를 고르거나 시트의 번호를 확인해 주세요. → " + b.dupNumbers.join(" / "));
       const warns = [];
       if (b.skipped.length) warns.push(`건너뛰는 행 ${b.skipped.length}개: ` + b.skipped.slice(0, 5).map((x) => `${x.line}행${x.name ? " " + x.name : ""}(${x.reason})`).join(", ") + (b.skipped.length > 5 ? " …" : ""));
       if (b.dupPhones.length) warns.push("연락처가 같은 행이 있어 나중 행을 써요: " + b.dupPhones.join(", "));
       if (b.invalidMbti) warns.push(`MBTI 형식이 아닌 값 ${b.invalidMbti}개는 비워 둬요.`);
       const noNum = b.rows.filter((p) => p.number == null).length;
-      if (b.rows.length && noNum) warns.push(`현장 번호가 없는 ${noNum}명은 같은 성별의 다음 번호를 자동으로 붙여요.`);
+      if (!toApp && b.rows.length && noNum) warns.push(`현장 번호가 없는 ${noNum}명은 같은 성별의 다음 번호를 자동으로 붙여요.`);
       const canRun = b.rows.length > 0 && !errs.length && !S.busy;
-      body = `<div class="mapgrid">${["phone", "name", "gender", "number", "age", "school", "mbti", "hobby", "date"].map(sel).join("")}</div>
+      body = `<div class="mapgrid">${["phone", "name", "gender", ...(toApp ? [] : ["number"]), "age", "school", "mbti", "hobby", "date", ...(toApp ? ["photo"] : [])].map(sel).join("")}</div>
         <div class="filters">
           ${dates.length
-            ? `<label class="mp"><span>가져올 날짜 (시트)</span><select id="imp-date">${dates.map((x) => `<option value="${x}" ${im.date === x ? "selected" : ""}>${esc(roundLabel(toRoundId(x)))}</option>`).join("")}</select></label>`
-            : `${importDateFields()}`}
+            ? `<label class="mp"><span>가져올 날짜 (시트)</span><select id="imp-date">${toApp ? `<option value="" ${im.date === "" ? "selected" : ""}>전체 날짜</option>` : ""}${dates.map((x) => `<option value="${x}" ${im.date === x ? "selected" : ""}>${esc(roundLabel(toRoundId(x)))}</option>`).join("")}</select></label>`
+            : (toApp ? "" : `${importDateFields()}`)}
           <label class="ck"><input type="checkbox" id="imp-onlydate" ${im.onlyDate ? "checked" : ""}> 이 날짜만 고른 사람만 (다른 날짜도 고른 사람 제외)</label>
-          <label class="ck"><input type="checkbox" id="imp-numbered" ${im.numberedOnly ? "checked" : ""}> 현장 번호가 있는 사람만</label>
-          <label class="ck"><input type="checkbox" id="imp-prune" ${im.prune ? "checked" : ""}> 이 회차에서 이번 명단에 없는 기존 참가자는 삭제</label>
+          ${toApp ? "" : `<label class="ck"><input type="checkbox" id="imp-numbered" ${im.numberedOnly ? "checked" : ""}> 현장 번호가 있는 사람만</label>
+          <label class="ck"><input type="checkbox" id="imp-prune" ${im.prune ? "checked" : ""}> 이 회차에서 이번 명단에 없는 기존 참가자는 삭제</label>`}
         </div>
         <p class="sum"><b>${b.rows.length}명</b> 가져와요 <span class="sub">(남 ${b.counts.M} · 여 ${b.counts.F})</span></p>
         ${errs.map((x) => `<p class="err">${esc(x)}</p>`).join("")}${warns.map((x) => `<p class="note">${esc(x)}</p>`).join("")}
         ${b.rows.length ? `<div class="tbl-wrap"><table><thead><tr><th class="num">번호</th><th>성별</th><th>이름</th><th>나이</th><th>대학·학과</th><th>MBTI</th><th>취미</th><th>연락처</th></tr></thead><tbody>${b.rows.slice(0, 8).map((p) => `<tr><td class="num">${p.number ?? "자동"}</td><td>${p.gender === "M" ? "남" : "여"}</td><td>${esc(p.name)}</td><td>${esc(p.age_label)}</td><td>${esc(p.school)}</td><td>${esc(p.mbti)}</td><td>${esc(p.hobby)}</td><td>${maskPhone(p.phone)}</td></tr>`).join("")}</tbody></table></div>${b.rows.length > 8 ? `<p class="sub" style="font-size:12.5px">… 외 ${b.rows.length - 8}명</p>` : ""}` : ""}
-        <div class="toolbar"><span class="sub" style="font-size:12.5px">${im.fileName ? esc(im.fileName) : "붙여넣은 내용"} · 이상형·사진·입금·추가요청 열은 읽지 않고 서버로 보내지 않아요.</span>
-          <button class="btn" style="width:auto" data-act="imp-run" ${canRun ? "" : "disabled"}>${S.confirm === "imp" ? "삭제가 포함돼요. 한 번 더 눌러 실행" : `${b.rows.length}명 가져오기`}</button></div>`;
+        <div class="toolbar"><span class="sub" style="font-size:12.5px">${im.fileName ? esc(im.fileName) : "붙여넣은 내용"} · ${toApp ? "사진은 링크만 저장하고 진행자만 볼 수 있어요. " : ""}이상형·입금·추가요청 열은 읽지 않고 서버로 보내지 않아요.</span>
+          <button class="btn" style="width:auto" data-act="imp-run" ${canRun ? "" : "disabled"}>${S.confirm === "imp" ? "삭제가 포함돼요. 한 번 더 눌러 실행" : toApp ? `${b.rows.length}명 신청자 명단에 넣기` : `${b.rows.length}명 가져오기`}</button></div>`;
     }
     return `<section class="panel" id="imp-details"><h2>명단 가져오기 <span class="sub">구글 시트 응답 → 참가자</span></h2>
-      <p class="note">날짜마다 한 번씩 가져오세요(예: 2026-11-06, 2026-11-08). 가져온 사람은 그 날짜의 참가자가 되어, 직접 등록한 사람과 같은 날짜에 합쳐져요. 시트가 바뀌면 같은 방법으로 다시 가져오면 돼요. 같은 날짜에서 연락처가 같은 사람은 정보만 갱신하고, 메모·선택은 그대로 유지돼요. <b>시트를 먼저 가져오고 나머지를 직접 등록하면</b> 번호가 겹치지 않아요.</p>
+      <div class="seg" role="radiogroup" aria-label="가져올 곳"><label><input type="radio" name="imp-dest" value="applicants" ${im.dest === "applicants" ? "checked" : ""}><span>신청자 명단 (나중에 배정)</span></label><label><input type="radio" name="imp-dest" value="round" ${im.dest === "round" ? "checked" : ""}><span>날짜에 바로 등록</span></label></div>
+      <p class="note">${im.dest === "applicants" ? "시트의 응답은 먼저 <b>신청자 명단</b>에 들어가요. 사진과 남녀 인원을 보고 <b>신청자</b> 탭에서 날짜에 배정하면 그때 참가자가 되고 번호가 붙어요. 같은 연락처를 다시 가져오면 정보만 갱신돼요." : "날짜마다 한 번씩 가져오세요(예: 2026-11-06, 2026-11-08). 가져온 사람은 그 날짜의 참가자가 되어, 직접 등록한 사람과 같은 날짜에 합쳐져요. 시트가 바뀌면 같은 방법으로 다시 가져오면 돼요. 같은 날짜에서 연락처가 같은 사람은 정보만 갱신하고, 메모·선택은 그대로 유지돼요. <b>시트를 먼저 가져오고 나머지를 직접 등록하면</b> 번호가 겹치지 않아요."}</p>
       <ol class="how"><li>구글 시트에서 <b>파일 → 다운로드 → 쉼표로 구분된 값(.csv)</b>을 받아 올리거나,</li><li>시트 전체를 선택(<b>Ctrl/⌘+A</b>)해 복사한 뒤 아래에 붙여넣으세요.</li></ol>
       <div class="impin"><input type="file" id="imp-file" accept=".csv,.tsv,.txt,text/csv,text/plain" aria-label="CSV 파일 선택">
         <textarea id="imp-text" placeholder="또는 여기에 붙여넣기" rows="3">${esc(im.text)}</textarea>
@@ -279,6 +283,7 @@
   const TABS = [
     ["picks", "최종 선택", ico('<path d="M12 20s-7.5-4.6-7.5-10A4.2 4.2 0 0 1 12 7.6 4.2 4.2 0 0 1 19.5 10c0 5.4-7.5 10-7.5 10z"/><path d="M9.3 11.6l2 2 3.6-3.8"/>')],
     ["people", "참가자", ico('<circle cx="9" cy="8.5" r="3"/><path d="M3.5 19c.5-3 2.7-4.8 5.5-4.8s5 1.8 5.5 4.8"/><circle cx="17" cy="9.5" r="2.4"/><path d="M16 14.4c2.6-.2 4.2 1.4 4.5 4.1"/>')],
+    ["applicants", "신청자", ico('<rect x="5" y="3.5" width="14" height="17" rx="2.5"/><path d="M9 8.5h6M9 12h6M9 15.5h3.5"/>')],
     ["add", "참가자 추가", ico('<circle cx="10" cy="8.5" r="3.2"/><path d="M4 19c.5-3.3 2.8-5 6-5s5.5 1.7 6 5"/><path d="M19 8v6M16 11h6"/>')],
     ["survey", "설문 결과", ico('<path d="M4.5 20V10M10 20V4.5M15.5 20v-7M21 20H3"/>')],
   ];
@@ -318,15 +323,76 @@
         ${surveyCards(d.surveys)}</section>`;
   }
 
+
+  /* ───────── [신청자] 대기 명단 → 날짜 배정 ───────── */
+  const applKnownRounds = () => S.rounds.filter((r) => r.count > 0 || r.id === S.round);
+  function applTarget() {
+    const a = S.appl, known = applKnownRounds();
+    return a.target && (a.target === "__new" || known.some((r) => r.id === a.target)) ? a.target : (known.some((r) => r.id === S.round) ? S.round : "__new");
+  }
+  function applFiltered() {
+    const a = S.appl;
+    return S.applicants.filter((x) => (a.showAssigned || !x.assigned_round)
+      && (!a.gender || x.gender === a.gender)
+      && (!a.date || (a.date === "__none" ? !x.pref_date : x.pref_date === a.date)));
+  }
+  function tabApplicants() {
+    const a = S.appl, all = S.applicants, wait = all.filter((x) => !x.assigned_round);
+    const list = applFiltered(), prefDates = Array.from(new Set(all.map((x) => x.pref_date).filter(Boolean))).sort();
+    const sel = list.filter((x) => a.sel[x.id] && !x.assigned_round), tg = applTarget();
+    const cnt = (g) => wait.filter((x) => x.gender === g).length;
+    const tr = S.rounds.find((r) => r.id === tg), baseM = tr ? tr.male || 0 : 0, baseF = tr ? tr.female || 0 : 0;
+    const addM = sel.filter((x) => x.gender === "M").length, addF = sel.filter((x) => x.gender === "F").length;
+    const tOpts = applKnownRounds().map((r) => `<option value="${esc(r.id)}" ${tg === r.id ? "selected" : ""}>${esc(roundLabel(r.id))} · 남 ${r.male || 0} · 여 ${r.female || 0}</option>`).join("");
+    const chev = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>`;
+    const rowsHtml = list.map((x) => {
+      const open = !!S.open["ap" + x.id], done = !!x.assigned_round;
+      const det = [["나이", x.age_label], ["대학·학과", splitSchool(x.school).filter(Boolean).join(" · ")], ["MBTI", x.mbti], ["취미", x.hobby], ["신청 날짜", x.pref_date ? roundLabel(x.pref_date) : "-"]]
+        .map(([k, v]) => `<div><dt>${k}</dt><dd>${esc(v || "-")}</dd></div>`).join("");
+      return `<div class="prow ${open ? "open" : ""} ${done ? "done" : ""}" role="listitem">
+        <div class="pmain apmain">
+          ${done ? `<span class="apck"></span>` : `<label class="apck"><input type="checkbox" data-appl-sel="${x.id}" ${a.sel[x.id] ? "checked" : ""} aria-label="${esc(x.name)} 선택"></label>`}
+          <span class="pnm">${esc(x.name)}</span><span class="pg g-${x.gender}">${x.gender === "M" ? "남" : "여"}</span>
+          <span class="pph">${done ? `<span class="tag y">${esc(roundLabel(x.assigned_round))} 배정</span>` : esc(x.age_label || "")}</span>
+          <button class="ptog" data-act="toggle" data-id="ap${x.id}" aria-expanded="${open}" aria-label="${esc(x.name)} 자세히 ${open ? "접기" : "보기"}">${chev}</button></div>
+        ${open ? `<dl class="pdet">${det}<div><dt>연락처</dt><dd>${esc(fmtPhone(x.phone))}</dd></div>
+          <div class="pact"><span>${x.photo_url ? `<a class="link" href="${esc(x.photo_url)}" target="_blank" rel="noopener noreferrer">사진 보기 ↗</a>` : `<span class="sub">사진 링크 없음</span>`}</span>
+            <span class="pbtns">${done ? `<button class="link" data-act="appl-unassign" data-id="${x.id}" data-name="${esc(x.name)}">${S.confirm === "un" + x.id ? "정말 배정 취소(참가자 삭제)" : "배정 취소"}</button>` : ""}<button class="link" data-act="appl-remove" data-id="${x.id}" data-name="${esc(x.name)}">${S.confirm === "ar" + x.id ? "정말 삭제" : "삭제"}</button></span></div></dl>` : ""}
+      </div>`;
+    }).join("");
+    return `<section class="stats s3">
+        <div class="stat"><small>대기 남성</small><b>${cnt("M")}<em>명</em></b></div>
+        <div class="stat"><small>대기 여성</small><b>${cnt("F")}<em>명</em></b></div>
+        <div class="stat"><small>배정 완료</small><b>${all.length - wait.length}<em>/ ${all.length}명</em></b></div>
+      </section>
+      <section class="panel"><h2>날짜에 배정 <span class="sub">사진과 성비를 보고 정해요</span></h2>
+        <div class="filters">
+          <label class="mp"><span>신청한 날짜</span><select id="ap-date"><option value="" ${!a.date ? "selected" : ""}>전체</option>${prefDates.map((d) => `<option value="${d}" ${a.date === d ? "selected" : ""}>${esc(roundLabel(d))}</option>`).join("")}<option value="__none" ${a.date === "__none" ? "selected" : ""}>날짜 없음</option></select></label>
+          <label class="mp"><span>성별</span><select id="ap-gender"><option value="" ${!a.gender ? "selected" : ""}>전체</option><option value="M" ${a.gender === "M" ? "selected" : ""}>남</option><option value="F" ${a.gender === "F" ? "selected" : ""}>여</option></select></label>
+          <label class="ck"><input type="checkbox" id="ap-showdone" ${a.showAssigned ? "checked" : ""}> 배정된 사람도 보기</label>
+        </div>
+        <div class="filters">
+          <label class="mp"><span>배정할 날짜</span><select id="ap-target">${tOpts}<option value="__new" ${tg === "__new" ? "selected" : ""}>＋ 새 날짜…</option></select></label>
+          ${tg === "__new" ? `<label class="mp"><span>새 날짜</span><input type="date" id="ap-newdate" value="${esc(a.newdate || todayISO())}"></label>` : ""}
+        </div>
+        <p class="sum"><b>${sel.length}명</b> 선택 <span class="sub">(남 ${addM} · 여 ${addF})</span>${sel.length ? ` → 배정 후 <b>남 ${baseM + addM} · 여 ${baseF + addF}</b>` : ""}</p>
+        <div class="toolbar"><span class="toolbar-l"><button class="btn sm ghost" data-act="appl-all">보이는 대기자 모두 선택</button> <button class="btn sm ghost" data-act="appl-none">선택 해제</button></span>
+          <button class="btn" style="width:auto" data-act="appl-assign" ${sel.length && !S.busy ? "" : "disabled"}>${sel.length}명 배정하기</button></div>
+      </section>
+      <section style="display:grid;gap:10px"><div class="sec-title"><h2>신청자</h2><span>${list.length}명 · 사진·연락처는 진행자만 볼 수 있어요</span></div>
+        ${list.length ? `<div class="plist" role="list">${rowsHtml}</div>` : `<div class="empty"><b>대기 중인 신청자가 없어요</b><p>'참가자 추가' 탭의 명단 가져오기에서 시트를 <b>신청자 명단</b>으로 넣어 주세요.</p></div>`}</section>`;
+  }
+
   function dashView() {
     const d = S.data, rnd = d.round;
     const head = `<header class="top"><div class="brand">gyeoL <small>진행자</small></div><div class="top-r"><button class="link" data-act="logout">나가기</button></div></header>
       ${api.mode === "demo" ? `<div class="demo-bar">체험 모드 · 참가자 화면과 같은 브라우저 데이터를 사용해요. <a href="index.html?demo">참가자 화면</a></div>` : ""}`;
     // 날짜(회차)가 하나도 없으면 '참가자 추가' 탭만 쓸 수 있다
-    const tab = rnd ? S.tab : "add", badCount = (d.picks || []).filter((x) => !x.target_id).length;
-    const nav = `<nav class="tabs" aria-label="진행자 메뉴">${TABS.map(([id, label, icon]) => `<button data-act="tab" data-v="${id}" class="${tab === id ? "on" : ""}" ${tab === id ? 'aria-current="page"' : ""} ${!rnd && id !== "add" ? "disabled" : ""}><span class="ico">${icon}</span>${label}${id === "picks" && badCount ? `<em class="bdg" aria-label="확인 필요 ${badCount}건">${badCount}</em>` : ""}</button>`).join("")}</nav>`;
+    const tab = rnd || S.tab === "applicants" ? S.tab : "add", badCount = (d.picks || []).filter((x) => !x.target_id).length;
+    const nav = `<nav class="tabs" aria-label="진행자 메뉴">${TABS.map(([id, label, icon]) => `<button data-act="tab" data-v="${id}" class="${tab === id ? "on" : ""}" ${tab === id ? 'aria-current="page"' : ""} ${!rnd && id !== "add" && id !== "applicants" ? "disabled" : ""}><span class="ico">${icon}</span>${label}${id === "picks" && badCount ? `<em class="bdg" aria-label="확인 필요 ${badCount}건">${badCount}</em>` : ""}</button>`).join("")}</nav>`;
     let body;
-    if (!rnd) body = `<div class="empty"><b>아직 날짜(회차)가 없어요</b><p>날짜를 골라 참가자를 추가하거나 구글 시트를 가져오면 그 날짜 회차가 만들어져요.</p></div>${importPanel(d)}${addPanel()}${entryPanel()}`;
+    if (tab === "applicants") body = tabApplicants();
+    else if (!rnd) body = `<div class="empty"><b>아직 날짜(회차)가 없어요</b><p>날짜를 골라 참가자를 추가하거나 구글 시트를 가져오면 그 날짜 회차가 만들어져요.</p></div>${importPanel(d)}${addPanel()}${entryPanel()}`;
     else if (tab === "picks") body = tabPicks(d, rnd);
     else if (tab === "people") body = tabPeople(d, rnd);
     else if (tab === "survey") body = tabSurvey(d, rnd);
@@ -433,6 +499,14 @@
     "imp-run": () => {
       const im = S.imp, b = im.built;
       if (!b || !b.rows.length) return;
+      if (im.dest === "applicants") {
+        return run(async () => {
+          const rows = b.rows.map((p) => ({ phone: p.phone, gender: p.gender, name: p.name, age_label: p.age_label, school: p.school, mbti: p.mbti, hobby: p.hobby, pref_date: p.pref_date, photo_url: p.photo_url }));
+          im.done = await api.admin.applicantImport(S.pin, rows);
+          S.tab = "applicants";
+          toast("신청자 명단에 넣었어요. 이제 날짜에 배정해 주세요.");
+        });
+      }
       if (im.prune && S.confirm !== "imp") return askConfirm("imp");
       run(async () => {
         const rows = b.rows.map((p) => ({ phone: p.phone, gender: p.gender, name: p.name, age_label: p.age_label, school: p.school, mbti: p.mbti, hobby: p.hobby, number: p.number }));
@@ -443,6 +517,29 @@
         S.round = rid;
         toast(label + " 명단을 가져왔어요.");
       });
+    },
+    "appl-all": () => { applFiltered().filter((x) => !x.assigned_round).forEach((x) => { S.appl.sel[x.id] = true; }); render(); },
+    "appl-none": () => { S.appl.sel = {}; render(); },
+    "appl-assign": () => {
+      const ids = applFiltered().filter((x) => S.appl.sel[x.id] && !x.assigned_round).map((x) => x.id);
+      const tg = applTarget(), rid = tg === "__new" ? String(S.appl.newdate || todayISO()) : tg;
+      if (!ids.length) return;
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(rid)) return toast("날짜를 골라 주세요.");
+      run(async () => {
+        const r = await api.admin.assign(S.pin, ids, rid, roundLabel(rid));
+        S.appl.sel = {}; S.appl.target = rid; S.round = rid;
+        toast(roundLabel(rid) + "에 " + r.assigned + "명을 배정했어요.");
+      });
+    },
+    "appl-unassign": (t) => {
+      const key = "un" + t.dataset.id;
+      if (S.confirm !== key) return askConfirm(key);
+      run(async () => { await api.admin.unassign(S.pin, t.dataset.id); toast(t.dataset.name + " 배정을 취소했어요."); });
+    },
+    "appl-remove": (t) => {
+      const key = "ar" + t.dataset.id;
+      if (S.confirm !== key) return askConfirm(key);
+      run(async () => { await api.admin.applicantRemove(S.pin, t.dataset.id); toast(t.dataset.name + " 신청자를 삭제했어요."); });
     },
     "csv-match": () => {
       const rows = [["남 번호", "남 이름", "여 번호", "여 이름"]];
@@ -459,6 +556,11 @@
     const t = e.target;
     if (t.id === "round-select") { S.round = t.value; S.confirm = ""; S.openPick = {}; S.open = {}; S.pickEdit = {}; run(async () => {}); return; }
     if (t.id === "add-round") { S.add.round = t.value; render(); return; }
+    if (t.id === "ap-date") { S.appl.date = t.value; render(); return; }
+    if (t.id === "ap-gender") { S.appl.gender = t.value; render(); return; }
+    if (t.id === "ap-showdone") { S.appl.showAssigned = t.checked; render(); return; }
+    if (t.id === "ap-target") { S.appl.target = t.value; render(); return; }
+    if (t.dataset && t.dataset.applSel) { if (t.checked) S.appl.sel[t.dataset.applSel] = true; else delete S.appl.sel[t.dataset.applSel]; render(); return; }
     const im = S.imp;
     if (t.id === "imp-file" && t.files && t.files[0]) {
       const f = t.files[0];
@@ -466,6 +568,7 @@
       return;
     }
     if (t.dataset && t.dataset.field) { im.map[t.dataset.field] = Number(t.value); render(); return; }
+    if (t.name === "imp-dest") { im.dest = t.value; im.date = ""; render(); return; }
     if (t.id === "imp-date") { im.date = t.value; render(); return; }
     if (t.id === "imp-round") { im.round = t.value; render(); return; }
     if (t.id === "imp-onlydate") { im.onlyDate = t.checked; render(); return; }
@@ -487,6 +590,7 @@
   document.addEventListener("input", (e) => {
     if (e.target.id === "imp-text") S.imp.text = e.target.value;
     if (e.target.id === "imp-newdate") S.imp.newdate = e.target.value;
+    if (e.target.id === "ap-newdate") S.appl.newdate = e.target.value;
     if (e.target.id && e.target.id.startsWith("add-") && e.target.id !== "add-details") {
       const k = e.target.id.slice(4);
       if (k === "phone") { e.target.value = e.target.value.replace(/\D/g, "").slice(0, 11); }   // '-' 를 입력하거나 붙여넣어도 숫자만 남긴다

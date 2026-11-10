@@ -75,6 +75,24 @@ begin
 end $$;
 
 
+-- 신청자 대기 명단: 구글폼/시트로 들어온 사람. 진행자가 사진·성비를 보고 회차에 배정하면 그때 참가자가 된다.
+-- 사진은 링크(구글 드라이브)만 저장하고, 진행자 함수에서만 내려준다.
+create table if not exists public.applicants (
+  id             uuid primary key default gen_random_uuid(),
+  phone          text not null unique,                  -- 숫자만. 같은 사람이 다시 신청하면 정보만 갱신
+  gender         text not null check (gender in ('M','F')),
+  name           text not null,
+  age_label      text,
+  school         text,
+  mbti           text,
+  hobby          text,
+  pref_date      text,                                  -- 신청한 날짜 YYYY-MM-DD (선호일, 배정과는 별개)
+  photo_url      text,
+  assigned_round text,                                  -- 배정된 회차. null 이면 대기 중
+  created_at     timestamptz not null default now()
+);
+alter table public.applicants enable row level security;
+
 -- 로그인 상태(브라우저에 저장되는 임의 토큰)
 create table if not exists public.sessions (
   token          uuid primary key default gen_random_uuid(),
@@ -377,7 +395,9 @@ begin
   return coalesce((
     select jsonb_agg(jsonb_build_object(
       'id', r.id, 'label', r.label, 'results_open', r.results_open,
-      'count', (select count(*) from public.participants p where p.round_id = r.id)) order by r.id)
+      'count', (select count(*) from public.participants p where p.round_id = r.id),
+      'male',  (select count(*) from public.participants p where p.round_id = r.id and p.gender = 'M'),
+      'female',(select count(*) from public.participants p where p.round_id = r.id and p.gender = 'F')) order by r.id)
     from public.rounds r), '[]'::jsonb);
 end $$;
 
@@ -469,6 +489,8 @@ create or replace function public.admin_remove(p_pin text, p_id uuid)
 returns void language plpgsql security definer set search_path = public as $$
 begin
   perform public._check_admin(p_pin);
+  update public.applicants a set assigned_round = null
+    from public.participants x where x.id = p_id and a.phone = x.phone and a.assigned_round = x.round_id;
   delete from public.participants where id = p_id;   -- 메모·선택·설문·로그인은 연쇄 삭제
 end $$;
 
@@ -478,6 +500,7 @@ returns void language plpgsql security definer set search_path = public as $$
 begin
   perform public._check_admin(p_pin);
   delete from public.participants where round_id = p_round;
+  update public.applicants set assigned_round = null where assigned_round = p_round;
   update public.rounds set results_open = false where id = p_round;
 end $$;
 
@@ -545,4 +568,90 @@ begin
     get diagnostics pruned = row_count;
   end if;
   return jsonb_build_object('inserted', ins, 'updated', upd, 'skipped', skipped, 'pruned', pruned);
+end $$;
+
+
+-- ───────────────────────── 신청자 대기 명단 (진행자) ─────────────────────────
+
+-- 전체 신청자 (연락처·사진 링크 포함). 배정된 사람도 함께 돌려준다.
+create or replace function public.admin_applicants(p_pin text)
+returns jsonb language plpgsql security definer set search_path = public as $$
+begin
+  perform public._check_admin(p_pin);
+  return coalesce((
+    select jsonb_agg(jsonb_build_object(
+      'id', a.id, 'phone', a.phone, 'gender', a.gender, 'name', a.name, 'age_label', a.age_label,
+      'school', a.school, 'mbti', a.mbti, 'hobby', a.hobby, 'pref_date', a.pref_date,
+      'photo_url', a.photo_url, 'assigned_round', a.assigned_round, 'created_at', a.created_at)
+      order by a.created_at, a.name)
+    from public.applicants a), '[]'::jsonb);
+end $$;
+
+-- 신청자 추가·갱신. 연락처가 같으면 정보만 갱신하고 배정 상태는 그대로 둔다.
+-- p_rows: [{phone, gender, name, age_label, school, mbti, hobby, pref_date, photo_url}]
+create or replace function public.admin_applicant_import(p_pin text, p_rows jsonb)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare r jsonb; ph text; g text; nm text; pd text; pu text; ins int := 0; upd int := 0; skipped int := 0;
+begin
+  perform public._check_admin(p_pin);
+  if jsonb_typeof(p_rows) <> 'array' then raise exception 'invalid_rows'; end if;
+  for r in select * from jsonb_array_elements(p_rows) loop
+    ph := public._norm_phone(r->>'phone'); g := r->>'gender'; nm := nullif(trim(r->>'name'), '');
+    pd := nullif(trim(r->>'pref_date'), ''); pu := nullif(trim(r->>'photo_url'), '');
+    if ph = '' or nm is null or g is null or g not in ('M','F') then skipped := skipped + 1; continue; end if;
+    if pd is not null and pd !~ '^\d{4}-\d{2}-\d{2}$' then pd := null; end if;
+    if pu is not null and pu !~* '^https?://' then pu := null; end if;
+    if exists (select 1 from public.applicants where phone = ph) then
+      update public.applicants set
+        gender = g, name = nm, age_label = nullif(trim(r->>'age_label'), ''), school = nullif(trim(r->>'school'), ''),
+        mbti = nullif(upper(trim(r->>'mbti')), ''), hobby = nullif(trim(r->>'hobby'), ''),
+        pref_date = coalesce(pd, pref_date), photo_url = coalesce(pu, photo_url)
+      where phone = ph;
+      upd := upd + 1;
+    else
+      insert into public.applicants (phone, gender, name, age_label, school, mbti, hobby, pref_date, photo_url)
+      values (ph, g, nm, nullif(trim(r->>'age_label'), ''), nullif(trim(r->>'school'), ''),
+              nullif(upper(trim(r->>'mbti')), ''), nullif(trim(r->>'hobby'), ''), pd, pu);
+      ins := ins + 1;
+    end if;
+  end loop;
+  return jsonb_build_object('inserted', ins, 'updated', upd, 'skipped', skipped);
+end $$;
+
+-- 신청자를 회차에 배정한다. 참가자가 만들어지고 번호는 성별별로 비어 있는 가장 작은 번호가 붙는다.
+create or replace function public.admin_assign(p_pin text, p_ids uuid[], p_round text, p_label text)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare rows jsonb; n int;
+begin
+  perform public._check_admin(p_pin);
+  if trim(coalesce(p_round, '')) !~ '^\d{4}-\d{2}-\d{2}$' then raise exception 'invalid_round'; end if;
+  select coalesce(jsonb_agg(jsonb_build_object(
+      'phone', a.phone, 'gender', a.gender, 'name', a.name, 'age_label', a.age_label,
+      'school', a.school, 'mbti', a.mbti, 'hobby', a.hobby) order by a.created_at), '[]'::jsonb)
+    into rows from public.applicants a
+   where a.id = any(p_ids) and a.assigned_round is null;
+  n := jsonb_array_length(rows);
+  if n = 0 then return jsonb_build_object('assigned', 0); end if;
+  perform public.admin_import(p_pin, trim(p_round), p_label, rows, false);
+  update public.applicants set assigned_round = trim(p_round) where id = any(p_ids) and assigned_round is null;
+  return jsonb_build_object('assigned', n);
+end $$;
+
+-- 배정을 되돌린다: 그 회차의 참가자(메모·선택·설문 포함)를 지우고 대기 상태로 돌린다.
+create or replace function public.admin_unassign(p_pin text, p_id uuid)
+returns void language plpgsql security definer set search_path = public as $$
+declare a public.applicants;
+begin
+  perform public._check_admin(p_pin);
+  select * into a from public.applicants where id = p_id;
+  if a.id is null or a.assigned_round is null then return; end if;
+  delete from public.participants where round_id = a.assigned_round and phone = a.phone;
+  update public.applicants set assigned_round = null where id = p_id;
+end $$;
+
+create or replace function public.admin_applicant_remove(p_pin text, p_id uuid)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  perform public._check_admin(p_pin);
+  delete from public.applicants where id = p_id;
 end $$;
