@@ -22,6 +22,7 @@
   const S = {
     ready: false, me: null, choices: null, tab: "mine",
     notes: {}, mine: { picks: [], submitted: false, answers: {} }, resultsOpen: false, result: null, paid: null, payForm: null,
+    dept: { open: false, dates: null, date: "", school: "", major: "", result: null, busy: false, error: "" },
     draftInputs: ["", "", ""], draftAnswers: {}, editSel: false,
     busy: false, error: "", draft: null,
     talk: { deck: "light", lock: false, dealing: false, d: { light: null, deep: null } },
@@ -82,6 +83,25 @@
       ${S.error ? `<p class="err">${esc(S.error)}</p>` : ""}
       <button class="link" type="button" data-act="backlogin" style="justify-self:start">← 번호 다시 입력</button></section>`;
   }
+  // 로그인 전에 쓰는 학과 검색: 같은 날짜 신청자 중에 같은 학교·학과가 있는지 있음/없음만 알려 준다
+  function deptPanel() {
+    const D = S.dept;
+    if (!D.open) return `<button class="btn ghost" type="button" data-act="dept-open">참가 전에 같은 학과 사람이 있는지 확인하기</button>`;
+    const dates = D.dates;
+    return `<section class="panel"><h2>같은 학과 확인</h2>
+      <p class="sub" style="font-size:13px">같은 학교·학과 사람이 부담스러울 때, 신청하기 전에 이번 날짜 신청자 중에 있는지 <b>있음/없음</b>만 확인할 수 있어요. 누구인지는 알려지지 않아요. 한 번에 한 학과씩 확인돼요.</p>
+      ${dates === null ? `<p class="sub">날짜를 불러오는 중…</p>` : !dates.length ? `<p class="note">지금 확인할 수 있는 날짜가 없어요. 신청자가 생기면 열려요.</p>` : `
+      <div class="field"><label for="d-date">날짜</label><select id="d-date" data-bind="ddate">${dates.map((d) => `<option value="${esc(d)}" ${D.date === d ? "selected" : ""}>${esc(roundLabel(d))}</option>`).join("")}</select></div>
+      <div class="field"><label for="d-school">대학</label><input id="d-school" type="text" data-bind="dschool" placeholder="예: 고려대" value="${esc(D.school)}" autocomplete="off" maxlength="30"></div>
+      <div class="field"><label for="d-major">학과</label><input id="d-major" type="text" data-bind="dmajor" placeholder="예: 건축학과" value="${esc(D.major)}" autocomplete="off" maxlength="30"></div>
+      ${D.error ? `<p class="err">${esc(D.error)}</p>` : ""}
+      <button class="btn" type="button" data-act="dept-check" ${D.busy ? "disabled" : ""}>${D.busy ? "확인 중…" : "확인하기"}</button>
+      ${D.result === null ? "" : D.result.exists
+        ? `<div class="deptres yes" role="status"><b>있어요</b><span>${esc(D.result.school)} ${esc(D.result.major)} 신청자가 이 날짜에 있어요.</span></div>`
+        : `<div class="deptres no" role="status"><b>없어요</b><span>${esc(D.result.school)} ${esc(D.result.major)} 신청자는 아직 이 날짜에 없어요.</span></div>`}
+      <p class="note">신청자는 계속 늘 수 있어서 지금 기준이에요. 표기가 다르면(예: 연대/연세대) 못 찾을 수 있어요. 학과 이름은 비슷해도 다르게 적힌 경우가 있으니 참고만 해 주세요.</p>`}
+      <button class="link" type="button" data-act="dept-close" style="justify-self:start">닫기</button></section>`;
+  }
   function authView() {
     return `<main class="wrap auth-wrap">
       <section class="hero"><img src="assets/hero.jpg" alt="붉은 실이 두 사람의 그림자 사이를 잇고 있는 모습"></section>
@@ -100,6 +120,7 @@
         <button class="btn" type="submit" ${S.busy ? "disabled" : ""}>${S.busy ? "확인 중…" : "입장하기"}</button>
         ${api.mode === "demo" ? `<p class="note">체험용 번호: <b>010-0000-1001</b> (남 1번 · 두 회차에 모두 있어 회차 선택이 나와요) · <b>010-0000-2001</b> (여 1번)</p>` : ""}
       </form>`}
+      ${S.choices ? "" : deptPanel()}
     </main>`;
   }
 
@@ -431,6 +452,25 @@
         toast("신청했어요. 진행자가 입금을 확인하면 열려요.");
       });
     },
+    "dept-open": async () => {
+      const D = S.dept; D.open = true; D.result = null; D.error = ""; render();
+      if (D.dates === null) {
+        try { D.dates = await api.deptDates(); D.date = D.date || D.dates[0] || ""; }
+        catch (e) { D.dates = []; D.error = friendly(e); }
+        render();
+      }
+    },
+    "dept-close": () => { S.dept.open = false; render(); },
+    "dept-check": async () => {
+      const D = S.dept;
+      if (D.busy) return;
+      D.error = ""; D.result = null;
+      if (!D.date || D.school.trim().length < 2 || !D.major.trim()) { D.error = "날짜와 대학, 학과를 적어 주세요."; render(); return; }
+      D.busy = true; render();
+      try { const r = await api.checkDept(D.date, D.school.trim(), D.major.trim()); D.result = { exists: !!r.exists, school: D.school.trim(), major: D.major.trim() }; }
+      catch (e) { D.error = friendly(e); }
+      D.busy = false; render();
+    },
     copy: async (t) => {
       try { await navigator.clipboard.writeText(t.dataset.v); toast("번호를 복사했어요."); }
       catch (e) { toast("길게 눌러 번호를 복사해 주세요."); }
@@ -466,6 +506,10 @@
       const c = document.getElementById("memocount"); if (c) c.textContent = filled + " / " + MEMO_SLOTS + "번 기록";
     }
     if (b === "ans") S.draftAnswers[e.target.dataset.q] = e.target.value;
+    if (b === "dschool" || b === "dmajor" || b === "ddate") document.querySelector(".deptres")?.remove();   // 입력을 바꾸면 이전 결과는 지운다
+    if (b === "dschool") { S.dept.school = e.target.value; S.dept.result = null; }
+    if (b === "dmajor") { S.dept.major = e.target.value; S.dept.result = null; }
+    if (b === "ddate") { S.dept.date = e.target.value; S.dept.result = null; }
     if (b === "depositor" && S.payForm) S.payForm.depositor = e.target.value;
     if (b === "paymsg" && S.payForm) {
       S.payForm.message = e.target.value;
