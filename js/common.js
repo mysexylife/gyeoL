@@ -163,7 +163,7 @@
       getMyPicks: () => authed("get_my_picks"),
       submitPicks: (inputs, survey) => authed("submit_picks", { p_inputs: inputs, p_survey: survey }),
       getResult: () => authed("get_result"),
-      requestPaid: (kind, target, depositor) => authed("request_paid", { p_kind: kind, p_target: target || null, p_depositor: depositor }),
+      requestPaid: (kind, target, depositor, message) => authed("request_paid", { p_kind: kind, p_target: target || null, p_depositor: depositor, p_message: message || null }),
       getPaid: () => authed("get_paid"),
       admin: {
         paid: (pin, round) => rpc("admin_paid", { p_pin: pin, p_round: round }),
@@ -308,7 +308,7 @@
           return { rank: i + 1, resolved: !!t, input: e.input, target_id: t ? t.id : null, number: t ? t.number : null, name: t ? t.name : null, age_label: t ? t.age_label : null, school: t ? t.school : null, mutual, phone: mutual ? t.phone : null };
         });
       }),
-      requestPaid: (kind, target, depositor) => op((s) => {
+      requestPaid: (kind, target, depositor, message) => op((s) => {
         const u = me(s);
         if (!s.rounds[u.round].results_open) fail("not_ready");
         const dep = String(depositor || "").trim().slice(0, 20);
@@ -323,7 +323,7 @@
         if (s.paid.some((q) => q.pid === u.id && q.kind === kind && q.target === tid && q.status !== "rejected")) fail("already_requested");
         const amount = kind === "votes" ? PRICE.votes : PRICE.contact;
         const id = "q" + s.seq++;
-        s.paid.push({ id, pid: u.id, kind, target: tid, depositor: dep, amount, status: "pending", created: Date.now() });
+        s.paid.push({ id, pid: u.id, kind, target: tid, depositor: dep, amount, status: "pending", created: Date.now(), message: kind === "contact" ? (String(message || "").trim().slice(0, 100) || null) : null });
         return { id, amount };
       }),
       getPaid: () => op((s) => {
@@ -334,8 +334,8 @@
           ? s.people.filter((x) => (s.picks[x.id] || []).some((p) => p.target === u.id)).length : null;
         return {
           prices: PRICE, pay_info: "체험용 은행 000-0000-0000 (예금주 gyeoL)", votes,
-          items: mine.map((q) => { const t = q.target ? s.people.find((x) => x.id === q.target) : null; return { id: q.id, kind: q.kind, target_id: q.target, target_number: t ? t.number : null, target_name: t ? t.name : null, status: q.status, amount: q.amount }; }),
-          received: all.filter((q) => q.kind === "contact" && q.target === u.id && q.status === "approved").map((q) => { const f = s.people.find((x) => x.id === q.pid); return f ? { number: f.number, name: f.name, age_label: f.age_label, school: f.school, phone: f.phone } : null; }).filter(Boolean),
+          items: mine.map((q) => { const t = q.target ? s.people.find((x) => x.id === q.target) : null; return { id: q.id, kind: q.kind, target_id: q.target, target_number: t ? t.number : null, target_name: t ? t.name : null, status: q.status, amount: q.amount, message: q.message || null }; }),
+          received: all.filter((q) => q.kind === "contact" && q.target === u.id && q.status === "approved").map((q) => { const f = s.people.find((x) => x.id === q.pid); return f ? { number: f.number, name: f.name, age_label: f.age_label, school: f.school, phone: f.phone, message: q.message || null } : null; }).filter(Boolean),
         };
       }),
       admin: {
@@ -344,7 +344,7 @@
           return (s.paid || []).map((q) => {
             const f = s.people.find((x) => x.id === q.pid); if (!f || f.round !== round) return null;
             const t = q.target ? s.people.find((x) => x.id === q.target) : null;
-            return { id: q.id, kind: q.kind, status: q.status, amount: q.amount, depositor: q.depositor, created_at: new Date(q.created).toISOString(), from_number: f.number, from_name: f.name, from_gender: f.gender, to_number: t ? t.number : null, to_name: t ? t.name : null };
+            return { id: q.id, kind: q.kind, status: q.status, amount: q.amount, depositor: q.depositor, message: q.message || null, created_at: new Date(q.created).toISOString(), from_number: f.number, from_name: f.name, from_gender: f.gender, to_number: t ? t.number : null, to_name: t ? t.name : null };
           }).filter(Boolean).sort((a, b) => (a.status !== "pending") - (b.status !== "pending") || (a.created_at < b.created_at ? -1 : 1));
         }),
         paidSet: (pin, id, status) => op((s) => { checkAdmin(pin); const q = (s.paid || []).find((x) => x.id === id); if (q) q.status = status; }),

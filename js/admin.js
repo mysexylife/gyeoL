@@ -299,7 +299,7 @@
     return `<section class="panel"><h2>유료 신청 <span class="sub">${wait.length ? `대기 <b class="badtxt">${wait.length}건</b>` : "대기 없음"} · 입금 확인 후 승인</span></h2>
       <div class="rows">${list.map((q) => `<div class="row paidrow ${q.status === "pending" ? "warn" : ""}">
         <span class="rm"><b>${q.from_gender === "M" ? "남" : "여"} ${q.from_number}번 ${esc(q.from_name)}</b>
-          <small>${q.kind === "votes" ? "득표수 확인" : `연락처 전달 → ${q.to_number}번 ${esc(q.to_name || "")}`} · ${won(q.amount)} · 입금자 <b>${esc(q.depositor)}</b></small></span>
+          <small>${q.kind === "votes" ? "득표수 확인" : `연락처 전달 → ${q.to_number}번 ${esc(q.to_name || "")}`} · ${won(q.amount)} · 입금자 <b>${esc(q.depositor)}</b></small>${q.message ? `<blockquote class="msg">${esc(q.message)}</blockquote>` : ""}</span>
         <span class="pbtns">${tagFor(q)}
           ${q.status !== "approved" ? `<button class="btn sm" data-act="paid-set" data-id="${q.id}" data-v="approved">승인</button>` : `<button class="link" data-act="paid-set" data-id="${q.id}" data-v="pending">승인 취소</button>`}
           ${q.status === "pending" ? `<button class="link" data-act="paid-set" data-id="${q.id}" data-v="rejected">거절</button>` : ""}</span></div>`).join("")}</div></section>`;

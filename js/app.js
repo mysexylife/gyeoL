@@ -208,6 +208,7 @@
       ${rec.map((r) => `<article class="res hit"><div class="who"><b>${r.number}번</b><span>${esc(r.name)}</span><span class="badge">연락처 전달</span></div>
         <p>${esc([r.age_label, splitSchool(r.school).filter(Boolean).join(" ")].filter(Boolean).join(" · "))}</p>
         <div class="phone">${esc(fmtPhone(r.phone))}</div>
+        ${r.message ? `<blockquote class="msg">${esc(r.message)}</blockquote>` : ""}
         <p class="gentle">연락은 하지 않으셔도 괜찮아요. 연락할지는 자유롭게 정해요.</p>
         <div class="acts"><button class="btn sm ghost" data-act="copy" data-v="${esc(r.phone)}">번호 복사</button><a class="btn sm ghost" style="text-decoration:none" href="tel:${esc(r.phone)}">전화 걸기</a></div></article>`).join("")}`;
   }
@@ -234,6 +235,7 @@
     const form = f ? `<section class="panel payform"><h2>${f.kind === "votes" ? "득표수 확인" : "연락처 전달"} 신청 · ${won(f.kind === "votes" ? P.prices.votes : P.prices.contact)}</h2>
         <p class="sub" style="font-size:13px">${f.kind === "contact" ? `<b>${esc(f.name || "")}</b> 님에게 내 이름과 연락처가 전달돼요. ` : ""}아래 계좌로 입금한 뒤 <b>입금자명</b>을 적어 신청하면, 진행자가 확인하고 열어 드려요.</p>
         <p class="payinfo">${P.pay_info ? esc(P.pay_info) : "입금 계좌는 진행자에게 문의해 주세요."}</p>
+        ${f.kind === "contact" ? `<div class="pkfield"><label for="paymsg">메시지 <small>선택 · 최대 100자</small></label><textarea id="paymsg" data-bind="paymsg" rows="3" maxlength="100" placeholder="짧게 인사를 남겨 보세요 (예: 오늘 대화 즐거웠어요!)">${esc(f.message || "")}</textarea><small class="sub" id="paymsgcount">${(f.message || "").length} / 100 · 진행자가 확인하고, 부적절한 내용은 전달되지 않아요.</small></div>` : ""}
         <div class="pkfield"><label for="depositor">입금자명</label><input id="depositor" type="text" data-bind="depositor" maxlength="20" placeholder="입금하신 분 이름" value="${esc(f.depositor)}" autocomplete="off"></div>
         ${S.error ? `<p class="err">${esc(S.error)}</p>` : ""}
         <div class="toolbar"><button class="btn ghost sm" data-act="pay-cancel">취소</button><button class="btn sm" data-act="pay-submit" ${S.busy ? "disabled" : ""}>신청하기</button></div></section>` : "";
@@ -416,7 +418,7 @@
     },
     "pay-open": (t) => {
       const k = t.dataset.kind, r = (S.result || []).find((x) => x.target_id === t.dataset.target);
-      S.payForm = { kind: k, target: t.dataset.target || null, name: r ? r.name : "", depositor: "" }; S.error = ""; render();
+      S.payForm = { kind: k, target: t.dataset.target || null, name: r ? r.name : "", depositor: "", message: "" }; S.error = ""; render();
       document.getElementById("depositor")?.focus();
     },
     "pay-cancel": () => { S.payForm = null; S.error = ""; render(); },
@@ -424,7 +426,7 @@
       const f = S.payForm;
       if (!f || !f.depositor.trim()) { S.error = "입금자명을 적어 주세요."; render(); return; }
       guarded(async () => {
-        await api.requestPaid(f.kind, f.target, f.depositor.trim());
+        await api.requestPaid(f.kind, f.target, f.depositor.trim(), f.kind === "contact" ? (f.message || "").trim() : "");
         S.paid = await api.getPaid(); S.payForm = null;
         toast("신청했어요. 진행자가 입금을 확인하면 열려요.");
       });
@@ -465,6 +467,10 @@
     }
     if (b === "ans") S.draftAnswers[e.target.dataset.q] = e.target.value;
     if (b === "depositor" && S.payForm) S.payForm.depositor = e.target.value;
+    if (b === "paymsg" && S.payForm) {
+      S.payForm.message = e.target.value;
+      const c = document.getElementById("paymsgcount"); if (c) c.textContent = e.target.value.length + " / 100 · 진행자가 확인하고, 부적절한 내용은 전달되지 않아요.";
+    }
     if (b === "pick") S.draftInputs[Number(e.target.dataset.i)] = e.target.value;
   });
   // 메모 칸에서 손을 떼는 순간(다른 칸·탭 누르기) 바로 저장해서, 앱을 바로 닫아도 남도록 한다
