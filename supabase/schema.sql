@@ -19,6 +19,13 @@ drop function if exists public.admin_set_phase(text, text);
 drop function if exists public.admin_set_phase(text, text, text);
 drop function if exists public.admin_reset(text);
 drop function if exists public.admin_import(text, jsonb, boolean);
+-- 없앤 기능(학과 있음/없음 검색)의 함수·테이블 정리. 이미 실행했더라도 지워진다.
+drop function if exists public.check_dept(text, text, text);
+drop function if exists public.check_dept_dates();
+drop function if exists public._school_key(text);
+drop function if exists public._norm_dept_part(text);
+drop function if exists public._norm_school_part(text);
+drop table if exists public.dept_checks;
 
 -- ───────────────────────── 테이블 ─────────────────────────
 
