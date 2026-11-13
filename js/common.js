@@ -30,8 +30,6 @@
     invalid_target: "선택할 수 없는 상대가 포함되어 있어요.",
     result_published: "매칭 결과가 이미 공개되어 선택을 바꿀 수 없어요.",
     not_ready: "아직 매칭 결과가 공개되지 않았어요.",
-    too_many_requests: "지금 조회하는 사람이 많아요. 잠시 뒤에 다시 해 주세요.",
-    invalid_input: "날짜와 대학, 학과를 정확히 적어 주세요.",
     depositor_required: "입금자명을 적어 주세요.",
     already_requested: "이미 신청했어요. 진행자 확인을 기다려 주세요.",
     invalid_slot: "메모 칸 번호가 올바르지 않아요.",
@@ -157,8 +155,6 @@
         catch (e) { if (String(e.message).includes("not_authenticated")) { setTok(null); return null; } throw e; }
       },
       // 입력한 번호가 진행자 마스터키인지 (참가자 로그인 화면에서 진행자가 같은 칸에 입력한다)
-      deptDates: async () => (await rpc("check_dept_dates", {})) || [],
-      checkDept: (date, school, dept) => rpc("check_dept", { p_date: date, p_school: school, p_dept: dept }),
       isMaster: async (key) => !!(await rpc("check_master", { p_key: key })),
       async logout() { const t = getTok(); setTok(null); if (t) { try { await rpc("logout", { p_token: t }); } catch (e) { /* 무시 */ } } },
       getStatus: () => authed("get_status"),
@@ -190,10 +186,6 @@
   }
 
   /* ───────────── 체험 모드 (localStorage, 가짜 명단 · 회차 2개) ───────────── */
-  // 학교·학과 표기 정규화 (schema.sql 의 _norm_school_part / _norm_dept_part 와 같은 규칙)
-  const normSchoolPart = (t) => { const v = String(t || "").toLowerCase().replace(/\s+/g, "").replace(/(대학교|대학)$/, "대"); return v === "연대" ? "연세대" : v === "고대" ? "고려대" : v; };
-  const normDeptPart = (t) => String(t || "").toLowerCase().replace(/\s+/g, "").replace(/(학과|학부|전공|과)$/, "").replace(/학$/, "");
-  const schoolKey = (s) => { const x = String(s || "").trim().replace(/\s*[-–]\s*|\s+/, "|").split("|"); return normSchoolPart(x[0]) + "|" + normDeptPart(x[1] || ""); };
   function demoApi() {
     const KEY = "rotation-note-demo-v3";
     const ADMIN_PIN = "01012345678";   // 체험 모드 마스터키
@@ -315,20 +307,6 @@
           const mutual = !!t && (s.picks[t.id] || []).some((p) => p.target === u.id);
           return { rank: i + 1, resolved: !!t, input: e.input, target_id: t ? t.id : null, number: t ? t.number : null, name: t ? t.name : null, age_label: t ? t.age_label : null, school: t ? t.school : null, mutual, phone: mutual ? t.phone : null };
         });
-      }),
-      deptDates: () => op((s) => {
-        const t = todayISO(), set = new Set();
-        (s.applicants || []).forEach((a) => { if (a.pref_date) set.add(a.pref_date); });
-        s.people.forEach((p) => set.add(String(p.round).slice(0, 10)));
-        return Array.from(set).filter((d) => d >= t).sort();
-      }),
-      checkDept: (date, school, dept) => op((s) => {
-        school = String(school || "").trim(); dept = String(dept || "").trim();
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(date || "") || school.length < 2 || school.length > 30 || dept.length < 1 || dept.length > 30) fail("invalid_input");
-        const k = normSchoolPart(school) + "|" + normDeptPart(dept);
-        const pool = (s.applicants || []).filter((a) => a.pref_date === date && a.school).map((a) => a.school)
-          .concat(s.people.filter((p) => String(p.round).slice(0, 10) === date && p.school).map((p) => p.school));
-        return { exists: pool.some((x) => schoolKey(x) === k) };
       }),
       requestPaid: (kind, target, depositor, message) => op((s) => {
         const u = me(s);
