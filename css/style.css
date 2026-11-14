@@ -8,33 +8,33 @@
 /* gyeoL 브랜드: 해질녘 벽에 드리운 그림자, 붉은 실, 부르고뉴 로고 색.
    레이아웃: 모바일 우선, 하단 탭. 카드는 번호가 가장 크게 보이는 명함 형태. */
 :root {
-  --bg: #f4ead0;
-  --surface: #fbf5e4;
-  --ink: #3b2a28;
-  --muted: #86705f;
-  --line: #e3d2aa;
-  --accent: #d4604f;
-  --accent-ink: #fff8ec;
-  --accent-soft: #f6dcc6;
-  --brand: #8e3a3b;
+  --bg: #ffffff;
+  --surface: #f6f6f7;
+  --ink: #0b0b0c;
+  --muted: #6e6e73;
+  --line: #e6e6ea;
+  --accent: #ff4f93;
+  --accent-ink: #ffffff;
+  --accent-soft: #ffe4ef;
+  --brand: #0b0b0c;
   --lime: #c9d58b;
-  --ok: #4a7a47;
-  --ok-soft: #e0ebc9;
-  --warn: #9a5a12;
-  --warn-soft: #f6e2b8;
-  --shadow: 0 1px 2px rgba(80, 45, 30, .08), 0 10px 28px rgba(120, 70, 40, .12);
-  --grain: .07;
+  --ok: #1f8f4e;
+  --ok-soft: #e2f5ea;
+  --warn: #a35f00;
+  --warn-soft: #fff0d1;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .05), 0 8px 24px rgba(0, 0, 0, .06);
+  --grain: 0;
   --serif: "Pretendard", "Noto Sans KR", system-ui, sans-serif;   /* 제목·이름·숫자 */
   --sans: "Pretendard", "Noto Sans KR", system-ui, -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #25201e; --surface: #322a27; --ink: #f2e7cd; --muted: #b6a58c; --line: #4b3f38;
-    --accent: #e7806d; --accent-ink: #2a120d; --accent-soft: #4a2e27; --brand: #e6a79f; --lime: #c9d58b;
-    --ok: #a9cf8a; --ok-soft: #2c3a24; --warn: #efc37a; --warn-soft: #3d2f16;
-    --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 10px 28px rgba(0, 0, 0, .4);
-    --grain: .12;
+    --bg: #0b0b0c; --surface: #1a1a1c; --ink: #f5f5f7; --muted: #9a9aa2; --line: #2c2c30;
+    --accent: #ff6aa5; --accent-ink: #1a0a12; --accent-soft: #3a1a29; --brand: #f5f5f7; --lime: #c9d58b;
+    --ok: #7fd6a0; --ok-soft: #14301f; --warn: #f0c070; --warn-soft: #33270f;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .5), 0 8px 24px rgba(0, 0, 0, .5);
+    --grain: 0;
     color-scheme: dark;
   }
 }
@@ -69,7 +69,7 @@ h1, h2, h3 { text-wrap: balance; }
 
 /* 입장 */
 .eyebrow { font-size: 12px; font-weight: 700; letter-spacing: .08em; color: var(--accent); text-transform: uppercase; }
-.intro h1 { font: 400 26px/1.35 var(--serif); margin: 6px 0 8px; letter-spacing: -.02em; }
+.intro h1 { font: 700 26px/1.35 var(--serif); margin: 6px 0 8px; letter-spacing: -.02em; }
 .sub { color: var(--muted); }
 .seg { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 4px; padding: 4px; background: var(--line); border-radius: 12px; }
 .seg button, .seg label { border: 0; background: transparent; padding: 9px 8px; border-radius: 9px; font-weight: 500; color: var(--muted); text-align: center; }
@@ -81,7 +81,7 @@ h1, h2, h3 { text-wrap: balance; }
 .seg input:disabled + span { opacity: .6; }
 
 .panel { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 16px; display: grid; gap: 14px; }
-.panel h2 { font: 400 17px/1.3 var(--serif); }
+.panel h2 { font: 700 17px/1.3 var(--serif); }
 .field { display: grid; gap: 6px; }
 .field > label, .field > .lbl { font-size: 13px; font-weight: 700; }
 .field small { color: var(--muted); font-size: 12px; }
@@ -133,7 +133,7 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .8; }
 
 /* 상대 카드 목록 */
 .sec-title { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
-.sec-title h2 { font: 400 19px/1.3 var(--serif); }
+.sec-title h2 { font: 700 19px/1.3 var(--serif); }
 .sec-title span { color: var(--muted); font-size: 13px; }
 .tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
 .tile { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 12px 6px 10px; display: grid; gap: 2px; justify-items: center; text-align: center; min-width: 0; }
@@ -369,7 +369,7 @@ h1, h2, h3 { letter-spacing: -.015em; }
 
 /* ───── 카드 앞면: 문양 ───── */
 .stackwrap.deck-deep { --ground: #a52638; --orn: #f2dca6; --orn2: rgba(242, 220, 166, .38); --thread: #f6e4b6; }
-.stackwrap.deck-light { --ground: #e4e9c1; --orn: #69753a; --orn2: rgba(105, 117, 58, .34); --thread: #d4604f; }
+.stackwrap.deck-light { --ground: #e4e9c1; --orn: #69753a; --orn2: rgba(105, 117, 58, .34); --thread: #ff4f93; }
 @media (prefers-color-scheme: dark) { .stackwrap.deck-light { --ground: #cbd68f; --orn: #3c4519; --orn2: rgba(60, 69, 25, .38); } }
 .stackwrap .ff { display: block; padding: 0; background: var(--ground); box-shadow: none; overflow: hidden; border-radius: 16px; }
 .ff svg.back { display: block; width: 100%; height: 100%; }
