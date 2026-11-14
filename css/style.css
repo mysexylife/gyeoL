@@ -254,7 +254,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .fb small { font-size: 11.5px; font-weight: 700; color: var(--accent); letter-spacing: .04em; }
 .fb p { font: 400 16px/1.5 var(--serif); text-wrap: balance; word-break: keep-all; }
 @media (prefers-reduced-motion: reduce) { .fi { transition: none; } }
-.tabs { grid-template-columns: repeat(4, 1fr); }
+.tabs { grid-template-columns: repeat(5, 1fr); }
 
 /* ───── gyeoL 브랜드 레이어 ───── */
 body::after { content: ""; position: fixed; inset: 0; z-index: 90; pointer-events: none; opacity: var(--grain); mix-blend-mode: multiply;
@@ -595,4 +595,17 @@ button.brand { background: none; border: 0; padding: 4px 0; cursor: pointer; -we
 .brand, .id-brand { font-family: "Jost", "Pretendard", sans-serif; }
 .msg { margin: 8px 0; padding: 8px 12px; border-left: 3px solid var(--accent); background: var(--bg); border-radius: 0 8px 8px 0; font-size: 14px; line-height: 1.55; white-space: pre-wrap; word-break: break-word; }
 .paidrow .rm { flex: 1 1 100%; }
+.pkfield textarea { width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; font: inherit; background: var(--surface); resize: vertical; }
+
+/* 운명의 실 */
+.popup { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; padding: 24px; background: rgba(40, 20, 16, .45); backdrop-filter: blur(2px); animation: popfade .25s ease; }
+.popcard { width: min(360px, 100%); background: var(--surface); border-radius: 20px; padding: 26px 22px 20px; text-align: center; display: grid; gap: 8px; box-shadow: 0 18px 50px rgba(0,0,0,.28); animation: poprise .3s ease; }
+.popico { font-size: 38px; line-height: 1; }
+.popcard h2 { font: 700 20px/1.35 var(--serif); }
+.popcard p { color: var(--muted); font-size: 14px; word-break: keep-all; }
+.popbtns { display: flex; gap: 8px; justify-content: center; margin-top: 8px; }
+@keyframes popfade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes poprise { from { transform: translateY(12px) scale(.97); opacity: 0; } to { transform: none; opacity: 1; } }
+.knot { display: grid; gap: 2px; padding: 14px 16px; border-radius: 14px; background: var(--ok-soft); color: var(--ok); }
+.knot b { font: 700 18px/1.3 var(--serif); }
 .pkfield textarea { width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; font: inherit; background: var(--surface); resize: vertical; }

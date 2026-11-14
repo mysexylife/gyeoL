@@ -11,6 +11,7 @@
     talk: svg('<path d="M5.5 5h13A2 2 0 0 1 20.5 7v8a2 2 0 0 1-2 2H11l-4.5 3.5V17h-1A2 2 0 0 1 3.5 15V7a2 2 0 0 1 2-2z"/><path d="M10.1 9.4a1.9 1.9 0 1 1 2.6 1.8c-.6.3-.8.6-.8 1.3"/><circle cx="11.9" cy="14.2" r=".5" fill="currentColor"/>'),
     memo: svg('<rect x="5.5" y="3.5" width="14" height="17" rx="2"/><path d="M9.5 8.5h6M9.5 12h6M9.5 15.5h3.5"/><path d="M5.5 7.5h-2M5.5 12h-2M5.5 16.5h-2"/>'),
     pick: svg('<path d="M12 20s-7.5-4.6-7.5-10A4.2 4.2 0 0 1 12 7.6 4.2 4.2 0 0 1 19.5 10c0 5.4-7.5 10-7.5 10z"/><path d="M9.3 11.6l2 2 3.6-3.8"/>'),
+    thread: svg('<path d="M4 8c3-4 6 4 8 0s5-4 8 0"/><path d="M4 16c3-4 6 4 8 0s5-4 8 0"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/>'),
     done: svg('<path d="M12 20s-7.5-4.6-7.5-10A4.2 4.2 0 0 1 12 7.6 4.2 4.2 0 0 1 19.5 10c0 5.4-7.5 10-7.5 10z" fill="currentColor" fill-opacity=".18"/><path d="M9.3 11.6l2 2 3.6-3.8"/>'),
   };
   const META = window.DECK_META;
@@ -22,6 +23,7 @@
   const S = {
     ready: false, me: null, choices: null, tab: "mine",
     notes: {}, mine: { picks: [], submitted: false, answers: {} }, resultsOpen: false, result: null, paid: null, payForm: null,
+    threads: null, threadsOpen: false, threadForm: { to: "", message: "", armed: false }, popup: null,
     draftInputs: ["", "", ""], draftAnswers: {}, editSel: false,
     busy: false, error: "", draft: null,
     talk: { deck: "light", lock: false, dealing: false, d: { light: null, deep: null } },
@@ -45,7 +47,9 @@
     S.mine = await api.getMyPicks();
     S.draftInputs = [0, 1, 2].map((i) => { const p = S.mine.picks[i]; return p ? (p.resolved ? String(p.number) : p.input || "") : ""; });
     S.draftAnswers = JSON.parse(JSON.stringify(S.mine.answers || {}));
-    S.resultsOpen = !!(await api.getStatus()).results_open;
+    const st = await api.getStatus();
+    S.resultsOpen = !!st.results_open; S.threadsOpen = !!st.threads_open;
+    S.threads = await api.getThreads();
     S.result = S.resultsOpen ? await api.getResult() : null;
     S.paid = S.resultsOpen ? await api.getPaid() : null;
   }
@@ -53,19 +57,33 @@
     S.me = await api.getMe();
     if (S.me) { await loadData(); S.tab = S.resultsOpen ? "pick" : "mine"; }
   }
+  // 운명의 실: 진행자가 열면 팝업, 실이 오거나 매듭이 되면 바로 알려 준다. 바뀌었으면 true
+  async function pollThreads(topen) {
+    const was = S.threadsOpen; S.threadsOpen = topen;
+    const prev = S.threads;
+    if (!topen && !was && !(prev && (prev.sent || prev.received.length))) return false;
+    const t = await api.getThreads();
+    S.threads = t;
+    let changed = JSON.stringify(t) !== JSON.stringify(prev);
+    if (topen && !was) { S.popup = { kind: "open" }; changed = true; }
+    if (prev && t.received.length > prev.received.length) { S.popup = { kind: "recv" }; changed = true; }
+    if (prev && t.sent && t.sent.knot && !(prev.sent && prev.sent.knot)) { S.popup = { kind: "knot" }; changed = true; }
+    return changed;
+  }
   // 진행자가 매칭 결과를 열면 자동으로 보여준다
   async function poll() {
     if (!S.me) return;
     try {
-      const open = !!(await api.getStatus()).results_open;
+      const st = await api.getStatus(), open = !!st.results_open;
+      const tChanged = await pollThreads(!!st.threads_open);
       if (open && S.resultsOpen) {   // 공개된 뒤 진행자가 선택을 조정하면 결과도 바로 바뀐다
         const r = await api.getResult(), pd = await api.getPaid();
         const changed = JSON.stringify(r) !== JSON.stringify(S.result) || JSON.stringify(pd) !== JSON.stringify(S.paid);
         S.result = r; S.paid = pd;
-        if (changed && !S.payForm) render();   // 입금자명을 적는 중에는 화면을 다시 그리지 않는다
+        if ((changed && !S.payForm) || tChanged) render();   // 입금자명을 적는 중에는 화면을 다시 그리지 않는다
         return;
       }
-      if (open === S.resultsOpen) return;
+      if (open === S.resultsOpen) { if (tChanged) render(); return; }
       S.resultsOpen = open;
       S.result = open ? await api.getResult() : null;
       S.paid = open ? await api.getPaid() : null;
@@ -246,6 +264,40 @@
       <p class="note">입금 확인은 진행자가 직접 해요. 승인되면 이 화면에 바로 나타나요.</p>`;
   }
 
+
+  /* ───────── 뷰: 운명의 실 (결의 실) ───────── */
+  function popupHTML() {
+    const P = S.popup;
+    if (!P || !S.me) return "";
+    const m = {
+      open: ["🧵", "운명의 실이 열렸어요", "3:3 대화가 끝났다면, 마음에 든 한 분께 익명으로 결의 실을 보내 보세요. 한 번만 보낼 수 있어요."],
+      recv: ["🧵", "누군가 당신에게 실을 보냈어요", "누구인지는 비밀이에요. 어떤 마음을 담았는지 확인해 보세요."],
+      knot: ["✨", "실이 매듭이 되었어요", "내가 실을 보낸 그분도 나에게 실을 보냈어요. 1:1 대화에서 서로를 알아봐 주세요."],
+    }[P.kind];
+    return `<div class="popup" role="dialog" aria-modal="true" aria-labelledby="pop-t"><div class="popcard"><div class="popico">${m[0]}</div><h2 id="pop-t">${m[1]}</h2><p>${m[2]}</p>
+      <div class="popbtns"><button class="btn ghost sm" data-act="popup-close">닫기</button><button class="btn sm" data-act="popup-go">${P.kind === "open" ? "실 보내러 가기" : "확인하러 가기"}</button></div></div></div>`;
+  }
+  function threadView() {
+    const T = S.threads || { open: false, sent: null, received: [] }, F = S.threadForm;
+    const guide = howto("운명의 실", "3:3 대화가 끝나고 1:1 대화 전에, 마음에 든 이성 <b>1명에게 익명</b>으로 보내는 결의 실이에요. 한 번만 보낼 수 있고 보낸 뒤에는 바꿀 수 없어요. 상대도 나에게 실을 보냈다면 실이 <b>매듭</b>이 돼요. 누가 보냈는지는 끝까지 알려지지 않아요.");
+    const knotBanner = T.sent && T.sent.knot ? `<div class="knot"><b>✨ 실이 매듭이 되었어요</b><span>내가 실을 보낸 <b>${T.sent.to_number}번 ${esc(T.sent.to_name)}</b> 님도 나에게 실을 보냈어요.</span></div>` : "";
+    let sendBox;
+    if (T.sent) sendBox = `<section class="panel"><h2>내가 보낸 실</h2><p><b>${T.sent.to_number}번 ${esc(T.sent.to_name)}</b> 님에게 보냈어요.</p><blockquote class="msg">${esc(T.sent.message)}</blockquote><p class="sub" style="font-size:12.5px">한 번 보낸 실은 바꿀 수 없어요. 상대에게는 보낸 사람이 알려지지 않아요.</p></section>`;
+    else if (!T.open) sendBox = `<div class="empty"><b>실 보내기가 아직 닫혀 있어요</b><p>진행자가 열면 화면에 알려 드려요. 3:3 대화가 끝난 뒤에 열려요.</p></div>`;
+    else sendBox = `<section class="panel"><h2>결의 실 보내기</h2>
+        <p class="sub" style="font-size:13px">마음에 든 이성의 <b>번호</b>를 적고, 짧은 메시지를 남겨요. 보낸 사람은 비밀로 전달돼요.</p>
+        <div class="pkfield"><label for="th-to">보낼 상대 번호</label><input id="th-to" type="text" inputmode="numeric" data-bind="thto" placeholder="예: 3" value="${esc(F.to)}" autocomplete="off" maxlength="3"></div>
+        <div class="pkfield"><label for="th-msg">메시지 <small>최대 60자</small></label><textarea id="th-msg" data-bind="thmsg" rows="3" maxlength="60" placeholder="예: 웃을 때 정말 좋았어요">${esc(F.message)}</textarea><small class="sub" id="thcount">${F.message.length} / 60</small></div>
+        ${S.error ? `<p class="err">${esc(S.error)}</p>` : ""}
+        ${F.armed ? `<p class="note"><b>${esc(F.to)}번</b>에게 실을 보낼까요? <b>한 번 보내면 바꿀 수 없어요.</b></p>` : ""}
+        <button class="btn" data-act="thread-send" ${S.busy ? "disabled" : ""}>${F.armed ? "네, 실을 보낼게요" : "실 보내기"}</button>
+        ${F.armed ? `<button class="link" data-act="thread-cancel" style="justify-self:start">다시 쓰기</button>` : ""}</section>`;
+    const recv = T.received.length
+      ? `<div class="sec-title"><h2>나에게 온 실</h2><span>${T.received.length}개</span></div>${T.received.map((r) => `<article class="res ${r.knot ? "hit" : ""}"><div class="who"><b>🧵</b><span>누군가 보낸 실</span>${r.knot ? `<span class="badge">매듭</span>` : ""}</div><blockquote class="msg">${esc(r.message)}</blockquote>${r.knot ? `<p class="gentle">내가 실을 보낸 분이 보낸 실이에요.</p>` : `<p class="gentle">누가 보냈는지는 비밀이에요.</p>`}</article>`).join("")}`
+      : `<p class="note">아직 받은 실이 없어요. 오면 바로 알려 드려요.</p>`;
+    return `${guide}${knotBanner}${sendBox}${recv}`;
+  }
+
   /* ───────── 뷰: 대화 카드 (덱) ───────── */
   // 카드 앞면(뒤집기 전): 이중 테두리, 마름모 격자, 햇살 메달리온, 붉은 실 하트, 로고
   function backSVG(label) {
@@ -308,12 +360,12 @@
     const y = window.scrollY;
     if (!S.ready) { $app.innerHTML = `${header()}<main class="wrap"><div class="empty">불러오는 중…</div></main>`; return; }
     if (!S.me) { $app.innerHTML = header() + authView(); return; }
-    const body = S.tab === "mine" ? mineView() : S.tab === "talk" ? talkView() : S.tab === "memo" ? memoView() : pickView();
+    const body = S.tab === "mine" ? mineView() : S.tab === "talk" ? talkView() : S.tab === "memo" ? memoView() : S.tab === "thread" ? threadView() : pickView();
     const tab = (id, label, icon) => `<button data-act="tab" data-v="${id}" class="${S.tab === id ? "on" : ""}" ${S.tab === id ? 'aria-current="page"' : ""}><span class="ico">${icon}</span>${label}</button>`;
     $app.innerHTML = `${header()}<main class="wrap">${body}</main>
       <nav class="tabs" aria-label="메뉴">
-        ${tab("mine", "내 프로필", ICON.mine)}${tab("talk", "대화 카드", ICON.talk)}${tab("memo", "메모장", ICON.memo)}${tab("pick", S.resultsOpen ? "매칭 결과" : "최종 선택", S.resultsOpen ? ICON.done : ICON.pick)}
-      </nav>`;
+        ${tab("mine", "내 프로필", ICON.mine)}${tab("talk", "대화 카드", ICON.talk)}${tab("memo", "메모장", ICON.memo)}${tab("thread", "운명의 실", ICON.thread)}${tab("pick", S.resultsOpen ? "매칭 결과" : "최종 선택", S.resultsOpen ? ICON.done : ICON.pick)}
+      </nav>${popupHTML()}`;
     window.scrollTo(0, y);
   }
 
@@ -382,7 +434,7 @@
       guarded(async () => { await finishLogin(await api.login(phone, round)); });
     },
     backlogin: () => { S.choices = null; S.error = ""; render(); },
-    logout: async () => { await flushAll(); await api.logout(); Object.assign(S, { me: null, choices: null, tab: "mine", notes: {}, result: null, paid: null, payForm: null, resultsOpen: false, editSel: false }); render(); },
+    logout: async () => { await flushAll(); await api.logout(); Object.assign(S, { me: null, choices: null, tab: "mine", notes: {}, result: null, paid: null, payForm: null, threads: null, threadsOpen: false, threadForm: { to: "", message: "", armed: false }, popup: null, resultsOpen: false, editSel: false }); render(); },
     ans: (t) => {
       const q = SURVEY.find((x) => x.id === t.dataset.q);
       const raw = t.dataset.v, v = q.type === "scale" ? Number(raw) : raw;
@@ -431,6 +483,20 @@
         toast("신청했어요. 진행자가 입금을 확인하면 열려요.");
       });
     },
+    "popup-close": () => { S.popup = null; render(); },
+    "popup-go": () => { S.popup = null; S.tab = "thread"; S.error = ""; render(); window.scrollTo(0, 0); },
+    "thread-cancel": () => { S.threadForm.armed = false; S.error = ""; render(); },
+    "thread-send": () => {
+      const F = S.threadForm, to = parseInt(F.to, 10);
+      if (!(to >= 1)) { S.error = "보낼 상대의 번호를 적어 주세요."; render(); return; }
+      if (!F.message.trim()) { S.error = "메시지를 적어 주세요."; render(); return; }
+      if (!F.armed) { F.armed = true; S.error = ""; render(); return; }
+      guarded(async () => {
+        await api.sendThread(to, F.message.trim());
+        S.threads = await api.getThreads(); S.threadForm = { to: "", message: "", armed: false };
+        toast("실을 보냈어요.");
+      });
+    },
     copy: async (t) => {
       try { await navigator.clipboard.writeText(t.dataset.v); toast("번호를 복사했어요."); }
       catch (e) { toast("길게 눌러 번호를 복사해 주세요."); }
@@ -466,6 +532,8 @@
       const c = document.getElementById("memocount"); if (c) c.textContent = filled + " / " + MEMO_SLOTS + "번 기록";
     }
     if (b === "ans") S.draftAnswers[e.target.dataset.q] = e.target.value;
+    if (b === "thto") { S.threadForm.to = e.target.value.replace(/\D/g, "").slice(0, 3); e.target.value = S.threadForm.to; S.threadForm.armed = false; }
+    if (b === "thmsg") { S.threadForm.message = e.target.value; S.threadForm.armed = false; const c = document.getElementById("thcount"); if (c) c.textContent = e.target.value.length + " / 60"; }
     if (b === "depositor" && S.payForm) S.payForm.depositor = e.target.value;
     if (b === "paymsg" && S.payForm) {
       S.payForm.message = e.target.value;

@@ -30,6 +30,9 @@
     invalid_target: "선택할 수 없는 상대가 포함되어 있어요.",
     result_published: "매칭 결과가 이미 공개되어 선택을 바꿀 수 없어요.",
     not_ready: "아직 매칭 결과가 공개되지 않았어요.",
+    threads_closed: "지금은 실을 보낼 수 없어요. 진행자가 열면 보낼 수 있어요.",
+    message_required: "실에 담을 메시지를 적어 주세요.",
+    already_sent: "이미 실을 보냈어요. 한 번 보내면 바꿀 수 없어요.",
     depositor_required: "입금자명을 적어 주세요.",
     already_requested: "이미 신청했어요. 진행자 확인을 기다려 주세요.",
     invalid_slot: "메모 칸 번호가 올바르지 않아요.",
@@ -163,9 +166,14 @@
       getMyPicks: () => authed("get_my_picks"),
       submitPicks: (inputs, survey) => authed("submit_picks", { p_inputs: inputs, p_survey: survey }),
       getResult: () => authed("get_result"),
+      getThreads: () => authed("get_threads"),
+      sendThread: (toNumber, message) => authed("send_thread", { p_to_number: toNumber, p_message: message }),
       requestPaid: (kind, target, depositor, message) => authed("request_paid", { p_kind: kind, p_target: target || null, p_depositor: depositor, p_message: message || null }),
       getPaid: () => authed("get_paid"),
       admin: {
+        setThreads: (pin, round, open) => rpc("admin_set_threads", { p_pin: pin, p_round: round, p_open: !!open }),
+        threads: (pin, round) => rpc("admin_threads", { p_pin: pin, p_round: round }),
+        threadDelete: (pin, id) => rpc("admin_thread_delete", { p_pin: pin, p_id: id }),
         paid: (pin, round) => rpc("admin_paid", { p_pin: pin, p_round: round }),
         paidSet: (pin, id, status) => rpc("admin_paid_set", { p_pin: pin, p_id: id, p_status: status }),
         rounds: (pin) => rpc("admin_rounds", { p_pin: pin }),
@@ -267,7 +275,7 @@
       getMe: () => op((s) => { const u = s.people.find((x) => x.id === s.session); return u ? mine(s, u) : null; }),
       isMaster: async (key) => digits(key) === ADMIN_PIN,
       logout: () => op((s) => { s.session = null; }),
-      getStatus: () => op((s) => ({ results_open: !!s.rounds[me(s).round].results_open })),
+      getStatus: () => op((s) => ({ results_open: !!s.rounds[me(s).round].results_open, threads_open: !!s.rounds[me(s).round].threads_open })),
       getNotes: () => op((s) => s.notes[me(s).id] || {}),
       saveNote: (slot, memo, mark) => op((s) => {
         const u = me(s);
@@ -308,6 +316,26 @@
           return { rank: i + 1, resolved: !!t, input: e.input, target_id: t ? t.id : null, number: t ? t.number : null, name: t ? t.name : null, age_label: t ? t.age_label : null, school: t ? t.school : null, mutual, phone: mutual ? t.phone : null };
         });
       }),
+      sendThread: (toNumber, message) => op((s) => {
+        const u = me(s);
+        if (!s.rounds[u.round].threads_open) fail("threads_closed");
+        const msg = String(message || "").trim().slice(0, 60);
+        if (!msg) fail("message_required");
+        const t = s.people.find((x) => x.round === u.round && x.gender !== u.gender && x.number === Number(toNumber));
+        if (!t) fail("invalid_target");
+        s.threads = s.threads || [];
+        if (s.threads.some((x) => x.from === u.id)) fail("already_sent");
+        s.threads.push({ id: "t" + s.seq++, from: u.id, to: t.id, message: msg, created: Date.now() });
+      }),
+      getThreads: () => op((s) => {
+        const u = me(s), all = s.threads || [], sent = all.find((x) => x.from === u.id);
+        const tgt = sent ? s.people.find((x) => x.id === sent.to) : null;
+        return {
+          open: !!s.rounds[u.round].threads_open,
+          sent: sent ? { to_number: tgt.number, to_name: tgt.name, message: sent.message, knot: all.some((x) => x.from === sent.to && x.to === u.id) } : null,
+          received: all.filter((x) => x.to === u.id).sort((a, b) => a.created - b.created).map((x) => ({ message: x.message, created_at: new Date(x.created).toISOString(), knot: !!sent && x.from === sent.to })),
+        };
+      }),
       requestPaid: (kind, target, depositor, message) => op((s) => {
         const u = me(s);
         if (!s.rounds[u.round].results_open) fail("not_ready");
@@ -339,6 +367,17 @@
         };
       }),
       admin: {
+        setThreads: (pin, round, open) => op((s) => { checkAdmin(pin); if (s.rounds[round]) s.rounds[round].threads_open = !!open; }),
+        threads: (pin, round) => op((s) => {
+          checkAdmin(pin);
+          const all = s.threads || [];
+          return all.map((t) => {
+            const f = s.people.find((x) => x.id === t.from), r = s.people.find((x) => x.id === t.to);
+            if (!f || !r || f.round !== round) return null;
+            return { id: t.id, message: t.message, created_at: new Date(t.created).toISOString(), from_number: f.number, from_name: f.name, from_gender: f.gender, to_number: r.number, to_name: r.name, knot: all.some((x) => x.from === t.to && x.to === t.from) };
+          }).filter(Boolean);
+        }),
+        threadDelete: (pin, id) => op((s) => { checkAdmin(pin); s.threads = (s.threads || []).filter((t) => t.id !== id); }),
         paid: (pin, round) => op((s) => {
           checkAdmin(pin);
           return (s.paid || []).map((q) => {
@@ -350,7 +389,7 @@
         paidSet: (pin, id, status) => op((s) => { checkAdmin(pin); const q = (s.paid || []).find((x) => x.id === id); if (q) q.status = status; }),
         rounds: (pin) => op((s) => {
           checkAdmin(pin);
-          return Object.keys(s.rounds).sort().map((id) => ({ id, label: s.rounds[id].label, results_open: !!s.rounds[id].results_open, count: s.people.filter((p) => p.round === id).length, male: s.people.filter((p) => p.round === id && p.gender === "M").length, female: s.people.filter((p) => p.round === id && p.gender === "F").length }));
+          return Object.keys(s.rounds).sort().map((id) => ({ id, label: s.rounds[id].label, results_open: !!s.rounds[id].results_open, threads_open: !!s.rounds[id].threads_open, count: s.people.filter((p) => p.round === id).length, male: s.people.filter((p) => p.round === id && p.gender === "M").length, female: s.people.filter((p) => p.round === id && p.gender === "F").length }));
         }),
         dashboard: (pin, round) => op((s) => {
           checkAdmin(pin);
@@ -368,7 +407,7 @@
             picks.push({ participant_id: p.id, rank: i + 1, target_id: e.target || null, input: e.input, target_number: t ? t.number : null, target_name: t ? t.name : null });
           }));
           return {
-            round: r ? { id: round, label: r.label, results_open: !!r.results_open } : null,
+            round: r ? { id: round, label: r.label, results_open: !!r.results_open, threads_open: !!r.threads_open } : null,
             results_open: r ? !!r.results_open : false,
             participants: here.map((p) => ({ id: p.id, number: p.number, gender: p.gender, name: p.name, phone: p.phone, age_label: p.age_label, school: p.school, mbti: p.mbti, hobby: p.hobby, submitted: !!s.surveys[p.id] }))
               .sort((a, b) => (a.gender === b.gender ? a.number - b.number : a.gender === "M" ? -1 : 1)),
@@ -396,7 +435,7 @@
           checkAdmin(pin);
           const gp = s.people.find((u) => u.id === id);
           if (gp) (s.applicants || []).forEach((a) => { if (a.phone === gp.phone && a.assigned_round === gp.round) a.assigned_round = null; });
-          s.people = s.people.filter((u) => u.id !== id); delete s.picks[id]; delete s.surveys[id]; delete s.notes[id];
+          s.people = s.people.filter((u) => u.id !== id); s.threads = (s.threads || []).filter((t) => t.from !== id && t.to !== id); delete s.picks[id]; delete s.surveys[id]; delete s.notes[id];
           if (s.session === id) s.session = null;
         }),
         reset: (pin, round) => op((s) => {
@@ -406,7 +445,8 @@
           s.people = s.people.filter((p) => p.round !== round);
           gone.forEach((id) => { delete s.picks[id]; delete s.surveys[id]; delete s.notes[id]; });
           if (gone.includes(s.session)) s.session = null;
-          if (s.rounds[round]) s.rounds[round].results_open = false;
+          s.threads = (s.threads || []).filter((t) => !gone.includes(t.from) && !gone.includes(t.to));
+          if (s.rounds[round]) { s.rounds[round].results_open = false; s.rounds[round].threads_open = false; }
         }),
         applicants: (pin) => op((s) => { checkAdmin(pin); return (s.applicants || []).map((a) => Object.assign({}, a)); }),
         applicantImport: (pin, rows) => op((s) => {

@@ -6,7 +6,7 @@
   const $app = document.getElementById("app");
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
-  const S = { pin: "", data: null, paid: [], applicants: [], appl: { date: "", gender: "", showAssigned: false, sel: {}, target: "", newdate: "", newtime: "" }, error: "", confirm: "", busy: false, round: "", rounds: [], tab: "picks", open: {}, openPick: {}, pickEdit: {}, onlyBad: false,
+  const S = { pin: "", data: null, paid: [], thr: [], applicants: [], appl: { date: "", gender: "", showAssigned: false, sel: {}, target: "", newdate: "", newtime: "" }, error: "", confirm: "", busy: false, round: "", rounds: [], tab: "picks", open: {}, openPick: {}, pickEdit: {}, onlyBad: false,
     add: { open: false, editing: false, round: "", newdate: "", newtime: "", name: "", gender: "", phone: "", number: "", age: "", school: "", mbti: "", hobby: "" },
     imp: { dest: "applicants", text: "", fileName: "", table: null, map: {}, date: "", round: "", newdate: "", newtime: "", numberedOnly: false, onlyDate: true, prune: false, done: null, error: "" } };
   try { S.pin = sessionStorage.getItem("rn_admin_pin") || ""; S.round = sessionStorage.getItem("rn_admin_round") || ""; S.tab = sessionStorage.getItem("rn_admin_tab") || "picks"; } catch (e) { /* 저장소 사용 불가 */ }
@@ -28,6 +28,7 @@
     }
     S.applicants = await api.admin.applicants(S.pin);
     S.paid = S.round ? await api.admin.paid(S.pin, S.round) : [];
+    S.thr = S.round ? await api.admin.threads(S.pin, S.round) : [];
     S.data = S.round ? await api.admin.dashboard(S.pin, S.round) : { round: null, results_open: false, participants: [], matches: [], surveys: [] };
     try { sessionStorage.setItem("rn_admin_round", S.round); sessionStorage.setItem("rn_admin_tab", S.tab); } catch (e) { /* 무시 */ }
   }
@@ -290,6 +291,16 @@
     ["survey", "설문 결과", ico('<path d="M4.5 20V10M10 20V4.5M15.5 20v-7M21 20H3"/>')],
   ];
 
+  // [운명의 실] 보내기 스위치(켜면 참가자 화면에 팝업) + 보낸 실 목록. 보낸 사람은 진행자만 볼 수 있다
+  function threadPanel(rnd) {
+    const open = !!rnd.threads_open, list = S.thr, knots = list.filter((t) => t.knot).length / 2;
+    return `<section class="panel"><h2>운명의 실 <span class="sub">3:3 끝난 뒤 · 1:1 전에 켜기</span></h2>
+      <div class="resultbar"><span class="tag ${open ? "y" : "n"}">${open ? "보내기 열림" : "닫힘"}</span><span class="sub" style="font-size:13px">보낸 실 ${list.length}개 · 매듭 ${Math.floor(knots)}쌍</span>
+        <button class="btn ${open ? "ghost" : ""}" style="width:auto" data-act="threads-toggle" ${S.busy ? "disabled" : ""}>${open ? (S.confirm === "th-off" ? "한 번 더 눌러 닫기" : "보내기 닫기") : S.confirm === "th-on" ? "한 번 더 눌러 열기" : "실 보내기 열기"}</button></div>
+      <p class="note">열면 참가자 화면에 <b>팝업</b>이 떠요(6초 안에). 닫아도 이미 보낸 실은 그대로 남아요.</p>
+      ${list.length ? `<div class="rows">${list.map((t) => `<div class="row paidrow ${t.knot ? "" : ""}"><span class="rm"><b>${t.from_gender === "M" ? "남" : "여"} ${t.from_number}번 ${esc(t.from_name)} → ${t.to_number}번 ${esc(t.to_name)}</b>${t.knot ? ` <span class="tag y">매듭</span>` : ""}<blockquote class="msg">${esc(t.message)}</blockquote></span><span class="pbtns"><button class="link" data-act="thread-del" data-id="${t.id}">${S.confirm === "td" + t.id ? "정말 삭제" : "삭제"}</button></span></div>`).join("")}</div>` : ""}</section>`;
+  }
+
   // [유료 신청] 입금을 확인하고 승인하면 참가자 화면에 득표수/연락처가 열린다
   function paidPanel() {
     const list = S.paid, wait = list.filter((q) => q.status === "pending");
@@ -308,7 +319,7 @@
   // [최종 선택 현황] 결과 공개 스위치 + 선택 현황·조정 + 매칭 쌍
   function tabPicks(d, rnd) {
     const ppl = d.participants, submitted = ppl.filter((p) => p.submitted).length, bad = (d.picks || []).filter((x) => !x.target_id).length;
-    return `<section class="panel"><div class="toolbar"><h2>${esc(roundLabel(rnd.id))} 매칭 결과</h2><button class="btn sm ghost" data-act="refresh">새로고침</button></div>
+    return `${threadPanel(rnd)}<section class="panel"><div class="toolbar"><h2>${esc(roundLabel(rnd.id))} 매칭 결과</h2><button class="btn sm ghost" data-act="refresh">새로고침</button></div>
         <p class="note">공개하면 참가자 화면에 <b>매칭 결과와 연락처</b>가 열리고, 이후엔 선택을 바꿀 수 없어요. 공개 전에 <b>확인 필요 0건</b>인지 확인하세요.</p>
         <div class="resultbar"><span class="tag ${d.results_open ? "y" : "n"}">${d.results_open ? "결과 공개 중" : "아직 비공개"}</span><span class="sub" style="font-size:13px">제출 ${submitted} / ${ppl.length}명 · 매칭 ${d.matches.length}쌍${bad ? ` · <b class="badtxt">확인 필요 ${bad}건</b>` : ""}</span>
           <button class="btn ${d.results_open ? "ghost" : ""}" style="width:auto" data-act="results" ${S.busy ? "disabled" : ""}>${d.results_open ? (S.confirm === "res-off" ? "한 번 더 눌러 공개 취소" : "공개 취소 (다시 제출 받기)") : S.confirm === "res-on" ? "한 번 더 눌러 공개" : "매칭 결과 공개하기"}</button></div></section>
@@ -559,6 +570,16 @@
       const key = "ar" + t.dataset.id;
       if (S.confirm !== key) return askConfirm(key);
       run(async () => { await api.admin.applicantRemove(S.pin, t.dataset.id); toast(t.dataset.name + " 신청자를 삭제했어요."); });
+    },
+    "threads-toggle": () => {
+      const open = !S.data.round.threads_open, key = open ? "th-on" : "th-off";
+      if (S.confirm !== key) return askConfirm(key);
+      run(async () => { await api.admin.setThreads(S.pin, S.round, open); toast(open ? "실 보내기를 열었어요. 참가자 화면에 팝업이 떠요." : "실 보내기를 닫았어요."); });
+    },
+    "thread-del": (t) => {
+      const key = "td" + t.dataset.id;
+      if (S.confirm !== key) return askConfirm(key);
+      run(async () => { await api.admin.threadDelete(S.pin, t.dataset.id); toast("실을 삭제했어요. 보낸 사람은 다시 보낼 수 있어요."); });
     },
     "paid-set": (t) => run(async () => { await api.admin.paidSet(S.pin, t.dataset.id, t.dataset.v); toast(t.dataset.v === "approved" ? "승인했어요. 참가자 화면에 바로 열려요." : t.dataset.v === "rejected" ? "거절했어요." : "대기로 되돌렸어요."); }),
     "csv-match": () => {

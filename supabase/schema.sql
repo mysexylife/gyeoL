@@ -45,6 +45,7 @@ create table if not exists public.rounds (
   created_at   timestamptz not null default now()
 );
 alter table public.rounds add column if not exists results_open boolean not null default false;
+alter table public.rounds add column if not exists threads_open boolean not null default false;   -- 운명의 실 보내기 (진행자가 켜고 끈다)
 alter table public.rounds drop column if exists phase;   -- v3 까지 쓰던 진행 단계
 
 -- 참가자 = (회차, 사람). 두 회차를 신청한 사람은 회차마다 한 줄씩 가진다.
@@ -122,6 +123,19 @@ create unique index if not exists paid_votes_once on public.paid_requests (parti
 create unique index if not exists paid_contact_once on public.paid_requests (participant_id, target_id) where kind = 'contact' and status <> 'rejected';
 alter table public.paid_requests add column if not exists message text;   -- 연락처 전달 때 함께 보내는 짧은 메시지(100자, 진행자가 승인할 때 확인)
 alter table public.paid_requests enable row level security;
+
+-- 운명의 실(결의 실): 3:3 대화 뒤 1:1 대화 전에, 마음에 든 이성 1명에게 익명 메시지와 함께 보낸다.
+-- 한 사람이 1개만 보낼 수 있고(보낸 뒤 취소 불가), 받는 사람은 보낸 사람을 알 수 없다. 서로 실을 보내면 '매듭'이 된다.
+create table if not exists public.threads (
+  id         uuid primary key default gen_random_uuid(),
+  from_id    uuid not null unique references public.participants(id) on delete cascade,
+  to_id      uuid not null references public.participants(id) on delete cascade,
+  message    text not null,
+  created_at timestamptz not null default now(),
+  check (from_id <> to_id)
+);
+create index if not exists threads_to_idx on public.threads (to_id);
+alter table public.threads enable row level security;
 
 -- 로그인 상태(브라우저에 저장되는 임의 토큰)
 create table if not exists public.sessions (
@@ -268,11 +282,11 @@ end $$;
 -- 내 회차에서 매칭 결과가 열렸는지
 create or replace function public.get_status(p_token uuid)
 returns jsonb language plpgsql stable security definer set search_path = public as $$
-declare ro boolean;
+declare ro boolean; tro boolean;
 begin
-  select r.results_open into ro from public.participants p join public.rounds r on r.id = p.round_id
+  select r.results_open, r.threads_open into ro, tro from public.participants p join public.rounds r on r.id = p.round_id
    where p.id = public._me(p_token);
-  return jsonb_build_object('results_open', coalesce(ro, false));
+  return jsonb_build_object('results_open', coalesce(ro, false), 'threads_open', coalesce(tro, false));
 end $$;
 
 create or replace function public.get_notes(p_token uuid)
@@ -424,7 +438,7 @@ begin
   perform public._check_admin(p_pin);
   return coalesce((
     select jsonb_agg(jsonb_build_object(
-      'id', r.id, 'label', r.label, 'results_open', r.results_open,
+      'id', r.id, 'label', r.label, 'results_open', r.results_open, 'threads_open', r.threads_open,
       'count', (select count(*) from public.participants p where p.round_id = r.id),
       'male',  (select count(*) from public.participants p where p.round_id = r.id and p.gender = 'M'),
       'female',(select count(*) from public.participants p where p.round_id = r.id and p.gender = 'F')) order by r.id)
@@ -437,7 +451,7 @@ returns jsonb language plpgsql security definer set search_path = public as $$
 begin
   perform public._check_admin(p_pin);
   return jsonb_build_object(
-    'round', (select jsonb_build_object('id', id, 'label', label, 'results_open', results_open) from public.rounds where id = p_round),
+    'round', (select jsonb_build_object('id', id, 'label', label, 'results_open', results_open, 'threads_open', threads_open) from public.rounds where id = p_round),
     'results_open', coalesce((select results_open from public.rounds where id = p_round), false),
     'participants', (
       select coalesce(jsonb_agg(jsonb_build_object(
@@ -531,7 +545,7 @@ begin
   perform public._check_admin(p_pin);
   delete from public.participants where round_id = p_round;
   update public.applicants set assigned_round = null where assigned_round = p_round;
-  update public.rounds set results_open = false where id = p_round;
+  update public.rounds set results_open = false, threads_open = false where id = p_round;
 end $$;
 
 -- 명단 가져오기. 한 회차 안에서 연락처가 같으면 갱신, 없으면 추가한다. (시트가 바뀌면 다시 가져오면 된다)
@@ -773,4 +787,80 @@ begin
   perform public._check_admin(p_pin);
   if p_status not in ('pending','approved','rejected') then raise exception 'invalid_status'; end if;
   update public.paid_requests set status = p_status, decided_at = case when p_status = 'pending' then null else now() end where id = p_id;
+end $$;
+
+
+-- ───────────────────────── 운명의 실 (참가자) ─────────────────────────
+
+-- 실 보내기: 같은 회차의 이성 1명을 번호로 고르고 메시지(60자)를 적는다. 한 번 보내면 바꿀 수 없다.
+create or replace function public.send_thread(p_token uuid, p_to_number int, p_message text)
+returns void language plpgsql security definer set search_path = public as $$
+declare me public.participants; tro boolean; target uuid; msg text := left(btrim(coalesce(p_message, '')), 60);
+begin
+  select * into me from public.participants where id = public._me(p_token);
+  select threads_open into tro from public.rounds where id = me.round_id;
+  if not coalesce(tro, false) then raise exception 'threads_closed'; end if;
+  if msg = '' then raise exception 'message_required'; end if;
+  select id into target from public.participants
+   where round_id = me.round_id and gender <> me.gender and number = p_to_number;
+  if target is null then raise exception 'invalid_target'; end if;
+  begin
+    insert into public.threads (from_id, to_id, message) values (me.id, target, msg);
+  exception when unique_violation then
+    raise exception 'already_sent';
+  end;
+end $$;
+
+-- 내가 보낸 실, 나에게 온 실(보낸 사람은 알려 주지 않는다), 매듭 여부
+create or replace function public.get_threads(p_token uuid)
+returns jsonb language plpgsql stable security definer set search_path = public as $$
+declare me public.participants; tro boolean; sent public.threads; tgt public.participants; knot boolean := false;
+begin
+  select * into me from public.participants where id = public._me(p_token);
+  select threads_open into tro from public.rounds where id = me.round_id;
+  select * into sent from public.threads where from_id = me.id;
+  if sent.id is not null then
+    select * into tgt from public.participants where id = sent.to_id;
+    knot := exists (select 1 from public.threads b where b.from_id = sent.to_id and b.to_id = me.id);
+  end if;
+  return jsonb_build_object(
+    'open', coalesce(tro, false),
+    'sent', case when sent.id is null then null else jsonb_build_object(
+      'to_number', tgt.number, 'to_name', tgt.name, 'message', sent.message, 'knot', knot) end,
+    'received', coalesce((
+      select jsonb_agg(jsonb_build_object('message', t.message, 'created_at', t.created_at,
+        'knot', (sent.id is not null and t.from_id = sent.to_id)) order by t.created_at)
+      from public.threads t where t.to_id = me.id), '[]'::jsonb));
+end $$;
+
+-- ───────────────────────── 운명의 실 (진행자) ─────────────────────────
+
+create or replace function public.admin_set_threads(p_pin text, p_round text, p_open boolean)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  perform public._check_admin(p_pin);
+  update public.rounds set threads_open = coalesce(p_open, false) where id = p_round;
+end $$;
+
+-- 한 회차의 모든 실(보낸 사람·받는 사람·메시지·매듭 여부). 진행자만 볼 수 있다.
+create or replace function public.admin_threads(p_pin text, p_round text)
+returns jsonb language plpgsql security definer set search_path = public as $$
+begin
+  perform public._check_admin(p_pin);
+  return coalesce((
+    select jsonb_agg(jsonb_build_object(
+      'id', t.id, 'message', t.message, 'created_at', t.created_at,
+      'from_number', f.number, 'from_name', f.name, 'from_gender', f.gender,
+      'to_number', r.number, 'to_name', r.name,
+      'knot', exists (select 1 from public.threads b where b.from_id = t.to_id and b.to_id = t.from_id)) order by t.created_at)
+    from public.threads t join public.participants f on f.id = t.from_id join public.participants r on r.id = t.to_id
+    where f.round_id = p_round), '[]'::jsonb);
+end $$;
+
+-- 문제가 있는 실을 지운다. 보낸 사람은 다시 보낼 수 있다.
+create or replace function public.admin_thread_delete(p_pin text, p_id uuid)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  perform public._check_admin(p_pin);
+  delete from public.threads where id = p_id;
 end $$;
