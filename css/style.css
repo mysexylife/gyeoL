@@ -290,7 +290,7 @@ h1, h2, h3 { letter-spacing: -.015em; }
 
 /* 입장 화면 히어로 */
 .hero { margin: 0 calc(-1 * max(16px, env(safe-area-inset-left, 0px))); position: relative; }
-.hero img { display: block; width: 100%; height: auto; aspect-ratio: 5 / 3; object-fit: cover; border-radius: 0 0 28px 28px; max-width: 100%; }
+.hero img { display: block; width: 100%; height: auto; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 0 0 28px 28px; max-width: 100%; }
 @media (min-width: 600px) { .hero { margin: 0; } .hero img { border-radius: 24px; } }
 .hero-copy { display: grid; gap: 10px; padding-top: 6px; }
 .logo-xl { font: 300 64px/.95 "Jost", sans-serif; color: var(--brand); letter-spacing: -.035em; }

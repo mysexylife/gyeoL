@@ -102,13 +102,10 @@
   }
   function authView() {
     return `<main class="wrap auth-wrap">
-      <section class="hero"><img src="assets/hero.jpg" alt="붉은 실이 두 사람의 그림자 사이를 잇고 있는 모습"></section>
+      <section class="hero"><img src="assets/hero.jpg" alt="안개 낀 바닷가를 함께 달리는 두 사람과 그 사이를 잇는 붉은 실"></section>
       <section class="hero-copy"><p class="eyebrow">ROTATION DATING</p>
         <h1 class="logo-xl">gyeoL</h1>
-        <p class="tagline">결이 맞는 사람을 만나는 곳</p>
-        <ul class="promo"><li><b>말주변 없어도 괜찮아요.</b> 질문 카드가 준비되어 있어 대화가 술술 풀려요.</li>
-          <li>MBTI·연애 스타일 같은 가벼운 질문부터</li>
-          <li>인생 우선순위, 갈등 해결 방식 같은 깊은 대화까지</li></ul></section>
+        <p class="tagline">결이 맞는 사람을 만나는 곳</p></section>
       ${S.choices ? choiceForm() : `<form id="f-login" class="panel" autocomplete="on">
         <h2>내 번호로 입장</h2>
         <div class="field"><label for="l-phone">신청할 때 적은 휴대폰 번호</label>
