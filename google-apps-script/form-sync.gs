@@ -23,6 +23,16 @@ function onFormSubmit(e) {
   console.log("전송 완료", send(row));
 }
 
+// 트리거를 화면에서 못 만들 때: 이 함수를 한 번 실행하면 '양식 제출 시' 트리거가 자동으로 만들어진다.
+// (응답 시트의 [확장 프로그램 → Apps Script] 로 연 프로젝트에서만 동작한다)
+function installTrigger() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  if (!ss) throw new Error("응답 시트에서 [확장 프로그램 → Apps Script] 로 연 프로젝트가 아닙니다. 시트에서 다시 열어 주세요.");
+  ScriptApp.getProjectTriggers().filter((t) => t.getHandlerFunction() === "onFormSubmit").forEach((t) => ScriptApp.deleteTrigger(t));
+  ScriptApp.newTrigger("onFormSubmit").forSpreadsheet(ss).onFormSubmit().create();
+  console.log("트리거를 만들었습니다: onFormSubmit (스프레드시트 · 양식 제출 시)");
+}
+
 // 응답 시트에 이미 있는 모든 행을 앱으로 보낸다. 처음 한 번 직접 실행하세요(상단 함수 선택 → syncAll → 실행).
 // 시간 기반 트리거(예: 5분마다)로 걸어 두면 시트를 직접 고친 내용도 따라갑니다.
 function syncAll() {
