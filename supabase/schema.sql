@@ -105,6 +105,8 @@ alter table public.applicants enable row level security;
 alter table public.app_settings add column if not exists price_votes   int  not null default 3000;
 alter table public.app_settings add column if not exists price_contact int  not null default 5000;
 alter table public.app_settings add column if not exists pay_info      text not null default '';
+-- 구글폼 연동용 비밀값(20자 이상 무작위). 비어 있으면 연동이 꺼져 있다. update app_settings set form_secret = '긴-무작위-문자열' where id = 1;
+alter table public.app_settings add column if not exists form_secret   text not null default '';
 
 -- 유료 신청: kind 'votes' = 나를 선택한 사람 수 확인, 'contact' = 매칭되지 않은 상대에게 내 연락처 전달.
 -- 입금은 앱 밖(계좌이체)에서 하고, 진행자가 확인해 승인한다.
@@ -631,13 +633,12 @@ begin
     from public.applicants a), '[]'::jsonb);
 end $$;
 
--- 신청자 추가·갱신. 연락처가 같으면 정보만 갱신하고 배정 상태는 그대로 둔다.
--- p_rows: [{phone, gender, name, age_label, school, mbti, hobby, pref_date, photo_url}]
-create or replace function public.admin_applicant_import(p_pin text, p_rows jsonb)
+-- 신청자 추가·갱신의 공통 처리. 연락처가 같으면 정보만 갱신하고 배정 상태는 그대로 둔다.
+-- (브라우저에서 직접 호출하지 못하도록 아래에서 실행 권한을 막는다. 진행자 함수와 구글폼 수신 함수만 부른다.)
+create or replace function public._applicant_upsert(p_rows jsonb)
 returns jsonb language plpgsql security definer set search_path = public as $$
 declare r jsonb; ph text; g text; nm text; pd text; pu text; ins int := 0; upd int := 0; skipped int := 0;
 begin
-  perform public._check_admin(p_pin);
   if jsonb_typeof(p_rows) <> 'array' then raise exception 'invalid_rows'; end if;
   for r in select * from jsonb_array_elements(p_rows) loop
     ph := public._norm_phone(r->>'phone'); g := r->>'gender'; nm := nullif(trim(r->>'name'), '');
@@ -660,6 +661,26 @@ begin
     end if;
   end loop;
   return jsonb_build_object('inserted', ins, 'updated', upd, 'skipped', skipped);
+end $$;
+revoke execute on function public._applicant_upsert(jsonb) from public, anon, authenticated;
+
+create or replace function public.admin_applicant_import(p_pin text, p_rows jsonb)
+returns jsonb language plpgsql security definer set search_path = public as $$
+begin
+  perform public._check_admin(p_pin);
+  return public._applicant_upsert(p_rows);
+end $$;
+
+-- 구글폼 응답 수신: 구글 쪽 Apps Script 가 폼이 제출될 때마다 호출한다. 비밀값이 맞아야 하고, 신청자 명단에만 넣는다.
+-- p_row: {phone, gender('M'|'F'), name, age_label, school, mbti, hobby, pref_date('YYYY-MM-DD'), photo_url}
+create or replace function public.form_submit(p_secret text, p_row jsonb)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare sec text;
+begin
+  select form_secret into sec from public.app_settings where id = 1;
+  if coalesce(length(sec), 0) < 20 or p_secret is distinct from sec then raise exception 'bad_secret'; end if;
+  if jsonb_typeof(p_row) <> 'object' then raise exception 'invalid_rows'; end if;
+  return public._applicant_upsert(jsonb_build_array(p_row));
 end $$;
 
 -- 신청자를 회차에 배정한다. 참가자가 만들어지고 번호는 성별별로 비어 있는 가장 작은 번호가 붙는다.

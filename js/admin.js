@@ -409,7 +409,7 @@
           <button class="btn" style="width:auto" data-act="appl-assign" ${sel.length && !S.busy ? "" : "disabled"}>${sel.length}명 배정하기</button></div>
       </section>
       <section style="display:grid;gap:10px"><div class="sec-title"><h2>신청자</h2><span>${list.length}명 · 사진·연락처는 진행자만 볼 수 있어요</span></div>
-        ${list.length ? `<div class="plist" role="list">${rowsHtml}</div>` : `<div class="empty"><b>대기 중인 신청자가 없어요</b><p>'참가자 추가' 탭의 명단 가져오기에서 시트를 <b>신청자 명단</b>으로 넣어 주세요.</p></div>`}</section>`;
+        ${list.length ? `<div class="plist" role="list">${rowsHtml}</div>` : `<div class="empty"><b>대기 중인 신청자가 없어요</b><p>구글폼을 연동하면 제출 즉시 여기에 나타나요. 연동 전 응답은 '참가자 추가' 탭의 명단 가져오기에서 <b>신청자 명단</b>으로 넣어 주세요.</p></div>`}</section>`;
   }
 
   function dashView() {
