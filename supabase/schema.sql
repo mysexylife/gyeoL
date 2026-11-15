@@ -9,6 +9,7 @@
 
 -- 이전 버전의 함수 정리 (인자가 달라졌거나 없어진 것들)
 drop function if exists public.login(text);
+drop function if exists public.login(text, text);   -- 비밀번호(4자리) 도입으로 인자가 바뀜. 예전 함수가 남으면 비밀번호를 우회하니 반드시 지운다
 drop function if exists public.get_phase();
 drop function if exists public.get_phase(uuid);
 drop function if exists public.get_cards(uuid);
@@ -140,6 +141,18 @@ create table if not exists public.threads (
 create index if not exists threads_to_idx on public.threads (to_id);
 alter table public.threads enable row level security;
 
+-- 참가자 비밀번호(숫자 4자리): 연락처 하나에 하나. 처음 입장할 때 본인이 정하고, 잊으면 진행자가 초기화한다.
+-- 해시(bcrypt)로만 저장한다. 틀리면 횟수를 세고, 5번 틀리면 10분 잠근다.
+create extension if not exists pgcrypto with schema extensions;
+create table if not exists public.accounts (
+  phone        text primary key,
+  pin_hash     text not null,
+  failed       int  not null default 0,
+  locked_until timestamptz,
+  created_at   timestamptz not null default now()
+);
+alter table public.accounts enable row level security;
+
 -- 로그인 상태(브라우저에 저장되는 임의 토큰)
 create table if not exists public.sessions (
   token          uuid primary key default gen_random_uuid(),
@@ -250,12 +263,42 @@ $$;
 
 -- 연락처로 입장. 명단(구글시트)에 있는 번호만 들어올 수 있다.
 -- 두 회차 이상에 있는 번호면 {choices:[{round_id,label}]} 를 돌려주고, 회차를 골라 다시 호출한다.
-create or replace function public.login(p_phone text, p_round text default null)
-returns jsonb language plpgsql security definer set search_path = public as $$
-declare ph text := public._norm_phone(p_phone); n int; pr public.participants; tok uuid;
+-- 번호가 명단에 있는지, 비밀번호가 이미 정해졌는지 (화면이 '정하기'/'입력' 중 무엇을 보여줄지 정하는 용도)
+create or replace function public.login_status(p_phone text)
+returns jsonb language sql stable security definer set search_path = public as $$
+  select jsonb_build_object(
+    'registered', exists (select 1 from public.participants where phone = public._norm_phone(p_phone)),
+    'has_pin', exists (select 1 from public.accounts where phone = public._norm_phone(p_phone)))
+$$;
+
+-- 로그인: 번호 + 비밀번호(숫자 4자리). p_set 이 true 면 아직 비밀번호가 없는 번호에 한해 처음 정한다.
+-- 틀린 횟수가 저장되도록(예외를 던지면 되돌려진다) 틀린 경우에는 오류 대신 {error, remaining} 를 돌려준다.
+create or replace function public.login(p_phone text, p_round text default null, p_pin text default null, p_set boolean default false)
+returns jsonb language plpgsql security definer set search_path = public, extensions as $$
+declare ph text := public._norm_phone(p_phone); n int; pr public.participants; tok uuid; acc public.accounts;
 begin
   select count(*) into n from public.participants where phone = ph;
   if n = 0 then raise exception 'not_registered'; end if;
+  if p_pin is null or p_pin !~ '^\d{4}$' then raise exception 'invalid_pin'; end if;
+  select * into acc from public.accounts where phone = ph;
+  if coalesce(p_set, false) then
+    if acc.phone is not null then raise exception 'pin_exists'; end if;
+    insert into public.accounts (phone, pin_hash) values (ph, crypt(p_pin, gen_salt('bf')));
+  else
+    if acc.phone is null then raise exception 'pin_not_set'; end if;
+    if acc.locked_until is not null and acc.locked_until > now() then
+      return jsonb_build_object('error', 'locked', 'minutes', greatest(1, ceil(extract(epoch from (acc.locked_until - now())) / 60)::int));
+    end if;
+    if acc.pin_hash <> crypt(p_pin, acc.pin_hash) then
+      if acc.failed + 1 >= 5 then
+        update public.accounts set failed = 0, locked_until = now() + interval '10 minutes' where phone = ph;
+        return jsonb_build_object('error', 'locked', 'minutes', 10);
+      end if;
+      update public.accounts set failed = failed + 1 where phone = ph;
+      return jsonb_build_object('error', 'bad_login', 'remaining', 5 - (acc.failed + 1));
+    end if;
+    update public.accounts set failed = 0, locked_until = null where phone = ph;
+  end if;
   if p_round is null and n > 1 then
     return jsonb_build_object('choices', (
       select jsonb_agg(jsonb_build_object('round_id', r.id, 'label', r.label) order by r.id)
@@ -461,7 +504,8 @@ begin
         'id', p.id, 'number', p.number, 'gender', p.gender, 'name', p.name, 'phone', p.phone,
         'age_label', p.age_label, 'school', p.school, 'mbti', p.mbti, 'hobby', p.hobby,
         'submitted', exists (select 1 from public.surveys s where s.participant_id = p.id),
-        'arrived', p.arrived_at is not null
+        'arrived', p.arrived_at is not null,
+        'has_pin', exists (select 1 from public.accounts ac where ac.phone = p.phone)
       ) order by p.gender desc, p.number), '[]'::jsonb) from public.participants p where p.round_id = p_round),
     -- 참가자별 최종 선택: target_id 가 없으면 명단에서 못 찾은 입력(진행자가 맞춰야 함)
     'picks', (
@@ -896,4 +940,12 @@ returns void language plpgsql security definer set search_path = public as $$
 begin
   perform public._check_admin(p_pin);
   update public.participants set arrived_at = case when coalesce(p_arrived, false) then coalesce(arrived_at, now()) else null end where id = p_id;
+end $$;
+
+-- 참가자가 비밀번호를 잊었을 때: 비밀번호를 지워서 다음 입장 때 다시 정하게 한다.
+create or replace function public.admin_reset_pin(p_pin text, p_phone text)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  perform public._check_admin(p_pin);
+  delete from public.accounts where phone = public._norm_phone(p_phone);
 end $$;

@@ -33,6 +33,9 @@
     threads_closed: "지금은 실을 보낼 수 없어요. 진행자가 열면 보낼 수 있어요.",
     message_required: "실에 담을 메시지를 적어 주세요.",
     already_sent: "이미 실을 보냈어요. 한 번 보내면 바꿀 수 없어요.",
+    invalid_pin: "비밀번호는 숫자 4자리예요.",
+    pin_exists: "이미 비밀번호가 정해진 번호예요. 비밀번호를 입력해 주세요.",
+    pin_not_set: "먼저 비밀번호를 정해 주세요.",
     depositor_required: "입금자명을 적어 주세요.",
     already_requested: "이미 신청했어요. 진행자 확인을 기다려 주세요.",
     invalid_slot: "메모 칸 번호가 올바르지 않아요.",
@@ -146,8 +149,10 @@
     return {
       mode: "live",
       // 반환: { me } 또는 { choices: [{round_id, label}] } (두 회차 이상에 있는 번호)
-      async login(phone, roundId) {
-        const r = await rpc("login", { p_phone: phone, p_round: roundId || null });
+      loginStatus: (phone) => rpc("login_status", { p_phone: phone }),
+      async login(phone, roundId, pin, setPin) {
+        const r = await rpc("login", { p_phone: phone, p_round: roundId || null, p_pin: pin || null, p_set: !!setPin });
+        if (r.error) return { error: r.error, remaining: r.remaining, minutes: r.minutes };   // 비밀번호가 틀림/잠김
         if (r.choices) return { choices: r.choices };
         setTok(r.token);
         return { me: r.me };
@@ -182,6 +187,7 @@
         setNumber: (pin, id, n) => rpc("admin_set_number", { p_pin: pin, p_id: id, p_number: n }),
         setPicks: (pin, participantId, targetIds) => rpc("admin_set_picks", { p_pin: pin, p_participant: participantId, p_targets: targetIds }),
         remove: (pin, id) => rpc("admin_remove", { p_pin: pin, p_id: id }),
+        resetPin: (pin, phone) => rpc("admin_reset_pin", { p_pin: pin, p_phone: phone }),
         setArrived: (pin, id, arrived) => rpc("admin_set_arrived", { p_pin: pin, p_id: id, p_arrived: !!arrived }),
         reset: (pin, round) => rpc("admin_reset", { p_pin: pin, p_round: round }),
         import: (pin, round, label, rows, prune) => rpc("admin_import", { p_pin: pin, p_round: round, p_label: label, p_rows: rows, p_prune: !!prune }),
@@ -265,9 +271,24 @@
 
     return {
       mode: "demo",
-      login: (phone, roundId) => op((s) => {
-        const hits = s.people.filter((x) => x.phone === normPhone(phone));
+      loginStatus: (phone) => op((s) => ({ registered: s.people.some((x) => x.phone === normPhone(phone)), has_pin: !!(s.pins || {})[normPhone(phone)] })),
+      login: (phone, roundId, pin, setPin) => op((s) => {
+        const ph = normPhone(phone), hits = s.people.filter((x) => x.phone === ph);
         if (!hits.length) fail("not_registered");
+        if (!/^\d{4}$/.test(String(pin || ""))) fail("invalid_pin");
+        s.pins = s.pins || {}; s.pinFail = s.pinFail || {};
+        if (setPin) { if (s.pins[ph]) fail("pin_exists"); s.pins[ph] = String(pin); }
+        else {
+          if (!s.pins[ph]) fail("pin_not_set");
+          const f = s.pinFail[ph] || { n: 0, until: 0 };
+          if (f.until > Date.now()) return { error: "locked", minutes: Math.max(1, Math.ceil((f.until - Date.now()) / 60000)) };
+          if (s.pins[ph] !== String(pin)) {
+            f.n += 1;
+            if (f.n >= 5) { s.pinFail[ph] = { n: 0, until: Date.now() + 10 * 60000 }; return { error: "locked", minutes: 10 }; }
+            s.pinFail[ph] = f; return { error: "bad_login", remaining: 5 - f.n };
+          }
+          s.pinFail[ph] = { n: 0, until: 0 };
+        }
         if (!roundId && hits.length > 1) return { choices: hits.map((h) => ({ round_id: h.round, label: s.rounds[h.round].label })).sort((a, b) => a.round_id.localeCompare(b.round_id)) };
         const u = hits.find((h) => !roundId || h.round === roundId) || fail("not_registered");
         u.loggedIn = true; s.session = u.id;
@@ -410,7 +431,7 @@
           return {
             round: r ? { id: round, label: r.label, results_open: !!r.results_open, threads_open: !!r.threads_open } : null,
             results_open: r ? !!r.results_open : false,
-            participants: here.map((p) => ({ id: p.id, number: p.number, gender: p.gender, name: p.name, phone: p.phone, age_label: p.age_label, school: p.school, mbti: p.mbti, hobby: p.hobby, submitted: !!s.surveys[p.id], arrived: !!p.arrived }))
+            participants: here.map((p) => ({ id: p.id, number: p.number, gender: p.gender, name: p.name, phone: p.phone, age_label: p.age_label, school: p.school, mbti: p.mbti, hobby: p.hobby, submitted: !!s.surveys[p.id], arrived: !!p.arrived, has_pin: !!(s.pins || {})[p.phone] }))
               .sort((a, b) => (a.gender === b.gender ? a.number - b.number : a.gender === "M" ? -1 : 1)),
             matches, picks,
             surveys: here.filter((p) => s.surveys[p.id]).map((p) => ({ gender: p.gender, answers: s.surveys[p.id] })),
@@ -432,6 +453,7 @@
           if (new Set(targets).size !== targets.length || targets.some((id) => { const t = s.people.find((x) => x.id === id); return !t || t.round !== me2.round || t.gender === me2.gender; })) fail("invalid_target");
           s.picks[pid] = targets.map((id) => ({ target: id, input: "" }));
         }),
+        resetPin: (pin, phone) => op((s) => { checkAdmin(pin); if (s.pins) delete s.pins[normPhone(phone)]; }),
         setArrived: (pin, id, arrived) => op((s) => { checkAdmin(pin); const p = s.people.find((x) => x.id === id); if (p) p.arrived = !!arrived; }),
         remove: (pin, id) => op((s) => {
           checkAdmin(pin);

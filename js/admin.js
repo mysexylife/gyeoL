@@ -227,7 +227,7 @@
             <button class="ptog" data-act="toggle" data-id="${p.id}" aria-expanded="${open}" aria-label="${esc(p.name)} 자세히 ${open ? "접기" : "보기"}">${chev}</button></div>
           ${open ? `<dl class="pdet">${rows}<div><dt>설문</dt><dd><span class="tag ${p.submitted ? "y" : "n"}">${p.submitted ? "제출" : "대기"}</span></dd></div>
             <div class="pact"><label>번호 <input class="numin" type="number" min="1" inputmode="numeric" data-id="${p.id}" data-old="${p.number}" value="${p.number}" aria-label="${esc(p.name)} 번호"></label>
-              <span class="pbtns"><button class="link" data-act="edit-person" data-id="${p.id}">정보 수정</button><button class="link" data-act="remove" data-id="${p.id}" data-name="${esc(p.name)}">${S.confirm === "rm" + p.id ? "정말 삭제" : "삭제"}</button></span></div></dl>` : ""}
+              <span class="pbtns">${p.has_pin ? `<button class="link" data-act="reset-pin" data-phone="${esc(p.phone)}" data-name="${esc(p.name)}">${S.confirm === "rp" + p.phone ? "정말 초기화" : "비밀번호 초기화"}</button>` : `<span class="sub" style="font-size:12px">비밀번호 미설정</span>`}<button class="link" data-act="edit-person" data-id="${p.id}">정보 수정</button><button class="link" data-act="remove" data-id="${p.id}" data-name="${esc(p.name)}">${S.confirm === "rm" + p.id ? "정말 삭제" : "삭제"}</button></span></div></dl>` : ""}
         </div>`;
       }).join("")}</div>`;
   }
@@ -489,6 +489,11 @@
       const open = !S.data.results_open, key = open ? "res-on" : "res-off";
       if (S.confirm !== key) return askConfirm(key);
       run(async () => { await api.admin.setResults(S.pin, S.round, open); toast(open ? "매칭 결과를 공개했어요." : "공개를 취소했어요."); });
+    },
+    "reset-pin": (t) => {
+      const key = "rp" + t.dataset.phone;
+      if (S.confirm !== key) return askConfirm(key);
+      run(async () => { await api.admin.resetPin(S.pin, t.dataset.phone); toast(t.dataset.name + " 님의 비밀번호를 초기화했어요. 다음 입장 때 다시 정해요."); });
     },
     remove: (t) => {
       const key = "rm" + t.dataset.id;

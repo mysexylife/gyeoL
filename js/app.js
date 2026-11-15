@@ -23,7 +23,7 @@
   const S = {
     ready: false, me: null, choices: null, tab: "mine",
     notes: {}, mine: { picks: [], submitted: false, answers: {} }, resultsOpen: false, result: null, paid: null, payForm: null,
-    threads: null, threadsOpen: false, threadForm: { to: "", message: "", armed: false }, popup: null,
+    threads: null, threadsOpen: false, threadForm: { to: "", message: "", armed: false }, popup: null, pinStep: null,
     draftInputs: ["", "", ""], draftAnswers: {}, editSel: false,
     busy: false, error: "", draft: null,
     talk: { deck: "light", lock: false, dealing: false, d: { light: null, deep: null } },
@@ -99,6 +99,21 @@
       ${S.error ? `<p class="err">${esc(S.error)}</p>` : ""}
       <button class="link" type="button" data-act="backlogin" style="justify-self:start">← 번호 다시 입력</button></section>`;
   }
+  // 번호를 넣은 뒤: 처음이면 비밀번호(숫자 4자리)를 정하고, 이미 정했으면 입력한다
+  function pinForm() {
+    const F = S.pinStep, set = F.mode === "set";
+    return `<form id="f-pin" class="panel" autocomplete="off">
+      <h2>${set ? "비밀번호 정하기" : "비밀번호 입력"}</h2>
+      <p class="note">${set ? "처음 입장하셨어요. <b>숫자 4자리</b> 비밀번호를 정해 주세요. 다음부터는 번호와 이 비밀번호로 입장해요. 잊어버리면 진행자에게 말하면 초기화해 줘요." : "정해 둔 <b>숫자 4자리</b> 비밀번호를 입력해 주세요."}</p>
+      <div class="field"><label for="p-pin">비밀번호 (숫자 4자리)</label>
+        <input id="p-pin" name="pin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="${set ? "new-password" : "current-password"}" value="${esc(F.pin)}" required></div>
+      ${set ? `<div class="field"><label for="p-pin2">한 번 더 입력</label>
+        <input id="p-pin2" name="pin2" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="new-password" value="${esc(F.pin2)}" required></div>` : ""}
+      ${S.error ? `<p class="err">${esc(S.error)}</p>` : ""}
+      <button class="btn" type="submit" ${S.busy ? "disabled" : ""}>${S.busy ? "확인 중…" : "입장하기"}</button>
+      <button class="link" type="button" data-act="pinback" style="justify-self:start">← 번호 다시 입력</button>
+    </form>`;
+  }
   function authView() {
     return `<main class="wrap auth-wrap">
       <section class="hero"><img src="assets/hero.jpg" alt="붉은 실이 두 사람의 그림자 사이를 잇고 있는 모습"></section>
@@ -108,14 +123,14 @@
         <ul class="promo"><li><b>말주변 없어도 괜찮아요.</b> 질문 카드가 준비되어 있어 대화가 술술 풀려요.</li>
           <li>MBTI·연애 스타일 같은 가벼운 질문부터</li>
           <li>인생 우선순위, 갈등 해결 방식 같은 깊은 대화까지</li></ul></section>
-      ${S.choices ? choiceForm() : `<form id="f-login" class="panel" autocomplete="on">
+      ${S.choices ? choiceForm() : S.pinStep ? pinForm() : `<form id="f-login" class="panel" autocomplete="on">
         <h2>내 번호로 입장</h2>
         <div class="field"><label for="l-phone">신청할 때 적은 휴대폰 번호</label>
           <input id="l-phone" name="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="010-1234-5678" value="${esc((S.draft || {}).phone || "")}" required></div>
         <p class="note">번호만 입력하면 들어와요. 내 연락처는 <b>서로 최종 선택이 일치했을 때만</b> 상대에게 전달돼요.</p>
         ${S.error ? `<p class="err">${esc(S.error)}</p>` : ""}
         <button class="btn" type="submit" ${S.busy ? "disabled" : ""}>${S.busy ? "확인 중…" : "입장하기"}</button>
-        ${api.mode === "demo" ? `<p class="note">체험용 번호: <b>010-0000-1001</b> (남 1번 · 두 회차에 모두 있어 회차 선택이 나와요) · <b>010-0000-2001</b> (여 1번)</p>` : ""}
+        ${api.mode === "demo" ? `<p class="note">처음 입장하면 비밀번호 4자리를 정해요(예: 1234). 체험용 번호: <b>010-0000-1001</b> (남 1번 · 두 회차에 모두 있어 회차 선택이 나와요) · <b>010-0000-2001</b> (여 1번)</p>` : ""}
       </form>`}
     </main>`;
   }
@@ -430,10 +445,11 @@
     reshuffle: () => { S.talk.d[S.talk.deck] = newDeck(S.talk.deck); render(); },
     pickround: (t) => {
       const phone = S.choices.phone, round = t.dataset.v;
-      guarded(async () => { await finishLogin(await api.login(phone, round)); });
+      guarded(async () => { await finishLogin(await api.login(phone, round, S.choices.pin, false)); });
     },
-    backlogin: () => { S.choices = null; S.error = ""; render(); },
-    logout: async () => { await flushAll(); await api.logout(); Object.assign(S, { me: null, choices: null, tab: "mine", notes: {}, result: null, paid: null, payForm: null, threads: null, threadsOpen: false, threadForm: { to: "", message: "", armed: false }, popup: null, resultsOpen: false, editSel: false }); render(); },
+    backlogin: () => { S.choices = null; S.pinStep = null; S.error = ""; render(); },
+    pinback: () => { S.draft = { phone: S.pinStep ? S.pinStep.phone : "" }; S.pinStep = null; S.error = ""; render(); },
+    logout: async () => { await flushAll(); await api.logout(); Object.assign(S, { me: null, choices: null, tab: "mine", notes: {}, result: null, paid: null, payForm: null, threads: null, threadsOpen: false, threadForm: { to: "", message: "", armed: false }, popup: null, pinStep: null, resultsOpen: false, editSel: false }); render(); },
     ans: (t) => {
       const q = SURVEY.find((x) => x.id === t.dataset.q);
       const raw = t.dataset.v, v = q.type === "scale" ? Number(raw) : raw;
@@ -522,6 +538,12 @@
       S.draft = { phone: v };
       return;
     }
+    if ((e.target.id === "p-pin" || e.target.id === "p-pin2") && S.pinStep) {
+      const v = e.target.value.replace(/\D/g, "").slice(0, 4);
+      e.target.value = v;
+      if (e.target.id === "p-pin") S.pinStep.pin = v; else S.pinStep.pin2 = v;
+      return;
+    }
     const b = e.target.dataset && e.target.dataset.bind;
     if (b === "memo") {
       const slot = e.target.dataset.slot, n = noteOf(slot);
@@ -548,26 +570,43 @@
   document.addEventListener("submit", (e) => {
     e.preventDefault();
     const f = e.target;
-    if (f.id !== "f-login") return;
-    const raw = String(new FormData(f).get("phone") || "");
-    S.draft = { phone: raw };
-    guarded(async () => {
-      const d = digits(raw);
-      if (d.length < 10 || d.length > 13) throw new Error("bad_phone");
-      let r;
-      try { r = await api.login(raw); }
-      catch (e) {
-        // 명단에 없는 번호가 진행자 마스터키라면 진행자 화면으로 보낸다
-        if (String(e.message).includes("not_registered") && (await api.isMaster(raw))) {
-          try { sessionStorage.setItem("rn_admin_pin", d); } catch (err) { /* 저장소 사용 불가: 진행자 화면에서 다시 입력 */ }
-          location.href = "admin.html" + location.search;
+    if (f.id === "f-login") {
+      const raw = String(new FormData(f).get("phone") || "");
+      S.draft = { phone: raw };
+      guarded(async () => {
+        const d = digits(raw);
+        if (d.length < 10 || d.length > 13) throw new Error("bad_phone");
+        const st = await api.loginStatus(raw);
+        if (!st.registered) {
+          // 명단에 없는 번호가 진행자 마스터키라면 진행자 화면으로 보낸다
+          if (await api.isMaster(raw)) {
+            try { sessionStorage.setItem("rn_admin_pin", d); } catch (err) { /* 저장소 사용 불가: 진행자 화면에서 다시 입력 */ }
+            location.href = "admin.html" + location.search;
+            return;
+          }
+          throw new Error("not_registered");
+        }
+        S.pinStep = { phone: raw, mode: st.has_pin ? "enter" : "set", pin: "", pin2: "" };
+      });
+      return;
+    }
+    if (f.id === "f-pin") {
+      const F = S.pinStep;
+      if (!F) return;
+      if (!/^\d{4}$/.test(F.pin)) { S.error = "비밀번호는 숫자 4자리예요."; render(); return; }
+      if (F.mode === "set" && F.pin !== F.pin2) { S.error = "두 번 입력한 비밀번호가 달라요."; render(); return; }
+      guarded(async () => {
+        const r = await api.login(F.phone, null, F.pin, F.mode === "set");
+        if (r.error) {
+          S.error = r.error === "locked" ? "비밀번호를 여러 번 틀려서 " + r.minutes + "분 뒤에 다시 할 수 있어요. 급하면 진행자에게 말해 주세요." : "비밀번호가 맞지 않아요. " + r.remaining + "번 더 틀리면 잠시 잠겨요.";
+          F.pin = ""; F.pin2 = "";
           return;
         }
-        throw e;
-      }
-      if (r.choices) { S.choices = { phone: raw, list: r.choices }; return; }
-      await finishLogin(r);
-    });
+        if (r.choices) { S.choices = { phone: F.phone, pin: F.pin, list: r.choices }; S.pinStep = null; return; }
+        S.pinStep = null;
+        await finishLogin(r);
+      });
+    }
   });
 
   async function finishLogin(r) {
