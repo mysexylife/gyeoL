@@ -11,7 +11,7 @@
     talk: svg('<path d="M5.5 5h13A2 2 0 0 1 20.5 7v8a2 2 0 0 1-2 2H11l-4.5 3.5V17h-1A2 2 0 0 1 3.5 15V7a2 2 0 0 1 2-2z"/><path d="M10.1 9.4a1.9 1.9 0 1 1 2.6 1.8c-.6.3-.8.6-.8 1.3"/><circle cx="11.9" cy="14.2" r=".5" fill="currentColor"/>'),
     memo: svg('<rect x="5.5" y="3.5" width="14" height="17" rx="2"/><path d="M9.5 8.5h6M9.5 12h6M9.5 15.5h3.5"/><path d="M5.5 7.5h-2M5.5 12h-2M5.5 16.5h-2"/>'),
     pick: svg('<path d="M12 20s-7.5-4.6-7.5-10A4.2 4.2 0 0 1 12 7.6 4.2 4.2 0 0 1 19.5 10c0 5.4-7.5 10-7.5 10z"/><path d="M9.3 11.6l2 2 3.6-3.8"/>'),
-    thread: svg('<circle cx="11" cy="11.5" r="7.3"/><path d="M4.2 9.3c3 2.2 8.4 2.2 11.4-.8M4.1 13.9c3 2.4 8.6 2.4 12.2-.4M8.6 4.7c2.1 3.2 2.1 9.2-.4 13.6M13.6 4.6c2.2 3 2.2 8.5.1 12.9"/><path d="M16.8 17.2c2.6.8 4.6 1.4 4.4 3.1-.2 1.5-2.6 1.4-3-.1"/>'),
+    thread: svg('<path d="M2.5 7.5c3.200-4.200 5.800-1.200 8.500 0s4.800.2 6-2.700"/><path d="M11 7.600c-2.600 2.800 2.800 3.800.2 6.900"/><path d="M11.200 21.500c-3.600-2.500-5.200-4.300-5.200-6.300a2.800 2.800 0 0 1 5.200-1.400 2.800 2.800 0 0 1 5.200 1.400c0 2-1.600 3.800-5.200 6.300z"/>'),
     done: svg('<path d="M12 20s-7.5-4.6-7.5-10A4.2 4.2 0 0 1 12 7.6 4.2 4.2 0 0 1 19.5 10c0 5.4-7.5 10-7.5 10z" fill="currentColor" fill-opacity=".18"/><path d="M9.3 11.6l2 2 3.6-3.8"/>'),
   };
   const META = window.DECK_META;
@@ -118,7 +118,7 @@
   }
 
   // 실타래 일러스트(팝업·받은 실 카드용): 분홍 실이 감긴 공과 늘어진 실 끝
-  const YARN = (heart) => `<svg class="yarn" viewBox="0 0 56 56" aria-hidden="true"><circle cx="25" cy="26" r="18" fill="#ffe4ef" stroke="#ff4f93" stroke-width="2"/><g fill="none" stroke="#ff4f93" stroke-width="1.8" stroke-linecap="round"><path d="M9 20c7 5.5 20 5.5 31-2"/><path d="M8 28c8 6 22 6 33-1"/><path d="M12 37c6 4 17 4 25-1.5"/><path d="M17 10c5.5 8 5.5 24-1 34"/><path d="M29 8.5c6 8 6 24 .5 35"/><path d="M39 38c7 2 12 4 11 9s-9 4-10-1.5"/></g>${heart ? '<path d="M44 14.5c-2.2-3-6.5-.8-4.6 2.6l4.6 4.4 4.6-4.4c1.9-3.4-2.4-5.6-4.6-2.6z" fill="#ff4f93"/>' : ""}</svg>`;
+  const YARN = () => `<svg class="yarn" viewBox="0 0 56 56" aria-hidden="true"><g fill="none" stroke="#f0405f" stroke-width="2" stroke-linecap="round"><path d="M3 14C11 3 17 22 26 12s12-9 27-1"/><path d="M27 12c-5 6 4 10 1 17"/></g><path d="M28 51c-9-6.300-12.500-10-12.500-14.600a6.600 6.600 0 0 1 12.500-2.900 6.600 6.600 0 0 1 12.500 2.900C40.500 41 37 44.700 28 51z" fill="#f0405f"/></svg>`;
   const AVATAR = {
     F: '<svg viewBox="0 0 120 120" role="img" aria-label="여성 일러스트"><rect width="120" height="120" fill="#FFE6EC"/><path d="M16 124 C16 96 38 86 60 86 C82 86 104 96 104 124 Z" fill="#F4A9BC"/><path d="M28 60 C26 20 94 20 92 60 L96 104 L24 104 Z" fill="#6A4650"/><rect x="52" y="74" width="16" height="16" rx="6" fill="#F6D3BC"/><ellipse cx="60" cy="58" rx="22" ry="25" fill="#F8DCC7"/><path d="M37 58 C34 30 86 30 83 58 C76 46 64 44 56 38 C50 48 42 52 37 58 Z" fill="#6A4650"/><circle cx="52" cy="62" r="2.3" fill="#3A2A2E"/><circle cx="68" cy="62" r="2.3" fill="#3A2A2E"/><ellipse cx="46" cy="69" rx="4.5" ry="2.6" fill="#F3A5AE" opacity=".65"/><ellipse cx="74" cy="69" rx="4.5" ry="2.6" fill="#F3A5AE" opacity=".65"/><path d="M55 70 Q60 74.5 65 70" fill="none" stroke="#3A2A2E" stroke-width="1.8" stroke-linecap="round"/></svg>',
     M: '<svg viewBox="0 0 120 120" role="img" aria-label="남성 일러스트"><rect width="120" height="120" fill="#DDEBFB"/><path d="M14 124 C14 96 38 86 60 86 C82 86 106 96 106 124 Z" fill="#8FB4E6"/><rect x="51" y="74" width="18" height="16" rx="6" fill="#F1CBB0"/><path d="M48 88 L60 100 L72 88 Z" fill="#EAF2FC"/><circle cx="37" cy="60" r="4.5" fill="#F4D3BB"/><circle cx="83" cy="60" r="4.5" fill="#F4D3BB"/><ellipse cx="60" cy="58" rx="22" ry="25" fill="#F7D8C0"/><path d="M36 56 C32 28 88 26 84 56 C82 46 74 40 62 40 C50 40 40 46 36 56 Z" fill="#3E4258"/><path d="M45 56 L53 56" stroke="#3E4258" stroke-width="2.2" stroke-linecap="round"/><path d="M67 56 L75 56" stroke="#3E4258" stroke-width="2.2" stroke-linecap="round"/><circle cx="52" cy="63" r="2.3" fill="#2B2D3C"/><circle cx="68" cy="63" r="2.3" fill="#2B2D3C"/><ellipse cx="46" cy="70" rx="4.5" ry="2.6" fill="#F0A9A0" opacity=".5"/><ellipse cx="74" cy="70" rx="4.5" ry="2.6" fill="#F0A9A0" opacity=".5"/><path d="M55 71 Q60 75 65 71" fill="none" stroke="#2B2D3C" stroke-width="1.8" stroke-linecap="round"/></svg>',
@@ -271,8 +271,8 @@
     const P = S.popup;
     if (!P || !S.me) return "";
     const m = {
-      open: [YARN(false), "운명의 실이 열렸어요", "3:3 대화가 끝났다면, 마음에 든 한 분께 익명으로 결의 실을 보내 보세요. 한 번만 보낼 수 있어요."],
-      recv: [YARN(false), "누군가 당신에게 실을 보냈어요", "누구인지는 비밀이에요. 어떤 마음을 담았는지 확인해 보세요."],
+      open: [YARN(), "운명의 실이 열렸어요", "3:3 대화가 끝났다면, 마음에 든 한 분께 익명으로 결의 실을 보내 보세요. 한 번만 보낼 수 있어요."],
+      recv: [YARN(), "누군가 당신에게 실을 보냈어요", "누구인지는 비밀이에요. 어떤 마음을 담았는지 확인해 보세요."],
     }[P.kind];
     return `<div class="popup" role="dialog" aria-modal="true" aria-labelledby="pop-t"><div class="popcard"><div class="popico">${m[0]}</div><h2 id="pop-t">${m[1]}</h2><p>${m[2]}</p>
       <div class="popbtns"><button class="btn ghost sm" data-act="popup-close">닫기</button><button class="btn sm" data-act="popup-go">${P.kind === "open" ? "실 보내러 가기" : "확인하러 가기"}</button></div></div></div>`;
@@ -292,7 +292,7 @@
         <button class="btn" data-act="thread-send" ${S.busy ? "disabled" : ""}>${F.armed ? "네, 실을 보낼게요" : "실 보내기"}</button>
         ${F.armed ? `<button class="link" data-act="thread-cancel" style="justify-self:start">다시 쓰기</button>` : ""}</section>`;
     const recv = T.received.length
-      ? `<div class="sec-title"><h2>나에게 온 실</h2><span>${T.received.length}개</span></div>${T.received.map((r) => `<article class="res thread"><div class="who">${YARN(false)}<span>누군가 보낸 실</span></div><blockquote class="msg">${esc(r.message)}</blockquote><p class="gentle">누가 보냈는지는 비밀이에요.</p></article>`).join("")}`
+      ? `<div class="sec-title"><h2>나에게 온 실</h2><span>${T.received.length}개</span></div>${T.received.map((r) => `<article class="res thread"><div class="who">${YARN()}<span>누군가 보낸 실</span></div><blockquote class="msg">${esc(r.message)}</blockquote><p class="gentle">누가 보냈는지는 비밀이에요.</p></article>`).join("")}`
       : `<p class="note">아직 받은 실이 없어요. 오면 바로 알려 드려요.</p>`;
     return `${guide}${sendBox}${recv}`;
   }

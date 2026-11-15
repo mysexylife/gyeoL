@@ -637,3 +637,4 @@ button.brand { background: none; border: 0; padding: 4px 0; cursor: pointer; -we
 .knot .yarn { width: 52px; height: 52px; }
 .knot span { display: grid; gap: 2px; }
 .knot small { font-size: 13px; font-weight: 500; opacity: .85; }
+.pkfield label small { display: block; font-weight: 400; color: var(--muted); }
