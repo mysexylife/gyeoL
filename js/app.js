@@ -117,28 +117,25 @@
     </main>`;
   }
 
-  // 실타래 일러스트(팝업·받은 실 카드용): 분홍 실이 감긴 공과 늘어진 실 끝
+  // 운명의 실 일러스트(팝업·받은 실 카드용): 물결치는 빨간 실 끝에 하트
   const YARN = () => `<svg class="yarn" viewBox="0 0 56 56" aria-hidden="true"><path d="M2 30C6.500 18 12 42 18.500 30s9-10 14.500 0" fill="none" stroke="#f0405f" stroke-width="2" stroke-linecap="round"/><path d="M44 45c-8-5.700-11-9.500-11-14a5.800 5.800 0 0 1 11-2.400 5.800 5.800 0 0 1 11 2.400c0 4.500-3 8.300-11 14z" fill="#f0405f"/></svg>`;
-  const AVATAR = {
-    F: '<svg viewBox="0 0 120 120" role="img" aria-label="여성 일러스트"><rect width="120" height="120" fill="#FFE6EC"/><path d="M16 124 C16 96 38 86 60 86 C82 86 104 96 104 124 Z" fill="#F4A9BC"/><path d="M28 60 C26 20 94 20 92 60 L96 104 L24 104 Z" fill="#6A4650"/><rect x="52" y="74" width="16" height="16" rx="6" fill="#F6D3BC"/><ellipse cx="60" cy="58" rx="22" ry="25" fill="#F8DCC7"/><path d="M37 58 C34 30 86 30 83 58 C76 46 64 44 56 38 C50 48 42 52 37 58 Z" fill="#6A4650"/><circle cx="52" cy="62" r="2.3" fill="#3A2A2E"/><circle cx="68" cy="62" r="2.3" fill="#3A2A2E"/><ellipse cx="46" cy="69" rx="4.5" ry="2.6" fill="#F3A5AE" opacity=".65"/><ellipse cx="74" cy="69" rx="4.5" ry="2.6" fill="#F3A5AE" opacity=".65"/><path d="M55 70 Q60 74.5 65 70" fill="none" stroke="#3A2A2E" stroke-width="1.8" stroke-linecap="round"/></svg>',
-    M: '<svg viewBox="0 0 120 120" role="img" aria-label="남성 일러스트"><rect width="120" height="120" fill="#DDEBFB"/><path d="M14 124 C14 96 38 86 60 86 C82 86 106 96 106 124 Z" fill="#8FB4E6"/><rect x="51" y="74" width="18" height="16" rx="6" fill="#F1CBB0"/><path d="M48 88 L60 100 L72 88 Z" fill="#EAF2FC"/><circle cx="37" cy="60" r="4.5" fill="#F4D3BB"/><circle cx="83" cy="60" r="4.5" fill="#F4D3BB"/><ellipse cx="60" cy="58" rx="22" ry="25" fill="#F7D8C0"/><path d="M36 56 C32 28 88 26 84 56 C82 46 74 40 62 40 C50 40 40 46 36 56 Z" fill="#3E4258"/><path d="M45 56 L53 56" stroke="#3E4258" stroke-width="2.2" stroke-linecap="round"/><path d="M67 56 L75 56" stroke="#3E4258" stroke-width="2.2" stroke-linecap="round"/><circle cx="52" cy="63" r="2.3" fill="#2B2D3C"/><circle cx="68" cy="63" r="2.3" fill="#2B2D3C"/><ellipse cx="46" cy="70" rx="4.5" ry="2.6" fill="#F0A9A0" opacity=".5"/><ellipse cx="74" cy="70" rx="4.5" ry="2.6" fill="#F0A9A0" opacity=".5"/><path d="M55 71 Q60 75 65 71" fill="none" stroke="#2B2D3C" stroke-width="1.8" stroke-linecap="round"/></svg>',
-  };
   /* ───────── 뷰: 내 프로필 카드 ───────── */
   const cell = (label, val, wide) => `<div class="cell ${wide ? "wide" : ""}"><dt>${label}</dt><dd>${val ? esc(val) : '<span class="nil">—</span>'}</dd></div>`;
   function mineView() {
     const m = S.me, [univ, dept] = splitSchool(m.school), hob = splitHobby(m.hobby), g = genderLabel(m.gender);
     return `${howto("내 프로필 카드", "상대에게 나를 소개하는 카드예요. 이 정보를 보고 편하게 이야기를 시작해 보세요. 내용이 다르면 운영진에게 알려 주세요.")}
-      <article class="pc2 g-${m.gender}" aria-label="${g} ${m.number}번 ${esc(m.name)}">
-        <div class="pc2-cover">
-          <svg viewBox="0 0 328 150" aria-hidden="true"><defs><filter id="cloudblur" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="6"/></filter></defs>
-            <g fill="#fff" filter="url(#cloudblur)" opacity=".85"><ellipse cx="96" cy="64" rx="64" ry="26"/><ellipse cx="128" cy="42" rx="40" ry="26"/><ellipse cx="70" cy="48" rx="30" ry="20"/><ellipse cx="248" cy="96" rx="58" ry="20"/><ellipse cx="270" cy="78" rx="30" ry="18"/></g></svg>
-          <span class="pc2-round">${esc(roundLabel(m.round_id))}</span><span class="pc2-gender">${m.gender === "M" ? "남자" : "여자"}</span>
-        </div>
-        <div class="pc2-avatar">${m.gender === "M" ? AVATAR.M : AVATAR.F}</div>
-        <div class="pc2-no" aria-hidden="true"><span>NO.</span><b>${String(m.number).padStart(2, "0")}</b></div>
-        <div class="pc2-id"><h3>${esc(m.name)}</h3><div class="u">${esc(univ || "—")}</div><div class="d">${esc(dept || "")}</div></div>
-        <div class="pc2-stats"><div><b>${esc(m.age_label || "—")}</b><span>나이</span></div><div><b class="mb">${esc(m.mbti || "—")}</b><span>MBTI</span></div></div>
-        <div class="pc2-hobby"><span>취미</span>${hob.length ? `<ul>${hob.slice(0, 5).map((h) => `<li>${esc(h)}</li>`).join("")}</ul>` : `<em>—</em>`}</div>
+      <article class="idcard" aria-label="${g} ${m.number}번 ${esc(m.name)}">
+        <div class="id-thread"></div>
+        <div class="id-top"><span class="id-brand">gyeoL</span><span class="id-round">${esc(roundLabel(m.round_id))}</span></div>
+        <div class="id-no" aria-hidden="true"><span class="id-g">${g}</span><span class="id-n">${m.number}</span><span class="id-u">번</span></div>
+        <h3 class="id-name">${esc(m.name)}</h3>
+        <dl class="id-grid">
+          ${cell("나이", m.age_label)}${cell("MBTI", m.mbti)}
+          ${cell("대학교", univ, true)}${cell("학과", dept, true)}
+          <div class="cell wide"><dt>HOBBY</dt><dd>${hob.length ? `<span class="chips">${hob.map((h) => `<span class="chip">${esc(h)}</span>`).join("")}</span>` : '<span class="nil">—</span>'}</dd></div>
+        </dl>
+        <div class="id-foot">ROTATION DATING</div>
+        <span class="id-mark" aria-hidden="true">gyeoL</span>
       </article>
       <p class="note">내 연락처(${esc(fmtPhone(m.phone))})는 <b>서로 최종 선택이 일치했을 때만</b> 상대에게 전달돼요.</p>`;
   }
