@@ -838,19 +838,17 @@ end $$;
 -- 내가 보낸 실, 나에게 온 실(보낸 사람은 알려 주지 않는다), 매듭 여부
 create or replace function public.get_threads(p_token uuid)
 returns jsonb language plpgsql stable security definer set search_path = public as $$
-declare me public.participants; tro boolean; sent public.threads; tgt public.participants; knot boolean := false;
+declare me public.participants; tro boolean; sent public.threads; tgt public.participants;
 begin
   select * into me from public.participants where id = public._me(p_token);
   select threads_open into tro from public.rounds where id = me.round_id;
   select * into sent from public.threads where from_id = me.id;
   if sent.id is not null then
     select * into tgt from public.participants where id = sent.to_id;
-    knot := exists (select 1 from public.threads b where b.from_id = sent.to_id and b.to_id = me.id);
   end if;
-  -- 매듭 여부만 알려 준다. 어떤 실이 매듭이 되었는지(받은 실 중 어느 것인지)는 표시하지 않는다.
+  -- 매듭(서로 실을 보냄)은 참가자에게 알리지 않는다. 진행자 화면(admin_threads)에서만 보인다.
   return jsonb_build_object(
     'open', coalesce(tro, false),
-    'knot', knot,
     'sent', case when sent.id is null then null else jsonb_build_object(
       'to_number', tgt.number, 'to_name', tgt.name, 'message', sent.message) end,
     'received', coalesce((

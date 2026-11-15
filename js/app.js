@@ -57,7 +57,7 @@
     S.me = await api.getMe();
     if (S.me) { await loadData(); S.tab = S.resultsOpen ? "pick" : "mine"; }
   }
-  // 운명의 실: 진행자가 열면 팝업, 실이 오거나 매듭이 되면 바로 알려 준다. 바뀌었으면 true
+  // 운명의 실: 진행자가 열면 팝업, 실이 오면 바로 알려 준다(매듭은 알리지 않는다). 바뀌었으면 true
   async function pollThreads(topen) {
     const was = S.threadsOpen; S.threadsOpen = topen;
     const prev = S.threads;
@@ -67,7 +67,6 @@
     let changed = JSON.stringify(t) !== JSON.stringify(prev);
     if (topen && !was) { S.popup = { kind: "open" }; changed = true; }
     if (prev && t.received.length > prev.received.length) { S.popup = { kind: "recv" }; changed = true; }
-    if (prev && t.knot && !prev.knot) { S.popup = { kind: "knot" }; changed = true; }
     return changed;
   }
   // 진행자가 매칭 결과를 열면 자동으로 보여준다
@@ -274,15 +273,13 @@
     const m = {
       open: [YARN(false), "운명의 실이 열렸어요", "3:3 대화가 끝났다면, 마음에 든 한 분께 익명으로 결의 실을 보내 보세요. 한 번만 보낼 수 있어요."],
       recv: [YARN(false), "누군가 당신에게 실을 보냈어요", "누구인지는 비밀이에요. 어떤 마음을 담았는지 확인해 보세요."],
-      knot: [YARN(true), "실이 매듭이 되었어요", "누군가와 마음이 이어졌어요. 1:1 대화에서 만나 보세요."],
     }[P.kind];
     return `<div class="popup" role="dialog" aria-modal="true" aria-labelledby="pop-t"><div class="popcard"><div class="popico">${m[0]}</div><h2 id="pop-t">${m[1]}</h2><p>${m[2]}</p>
       <div class="popbtns"><button class="btn ghost sm" data-act="popup-close">닫기</button><button class="btn sm" data-act="popup-go">${P.kind === "open" ? "실 보내러 가기" : "확인하러 가기"}</button></div></div></div>`;
   }
   function threadView() {
     const T = S.threads || { open: false, sent: null, received: [] }, F = S.threadForm;
-    const guide = howto("운명의 실", "3:3 대화가 끝나고 1:1 대화 전에, 마음에 든 이성 <b>1명에게 익명</b>으로 보내는 결의 실이에요. 한 번만 보낼 수 있고 보낸 뒤에는 바꿀 수 없어요. 상대도 나에게 실을 보냈다면 실이 <b>매듭</b>이 돼요. 누가 보냈는지는 끝까지 알려지지 않아요.");
-    const knotBanner = T.knot ? `<div class="knot">${YARN(true)}<span><b>실이 매듭이 되었어요</b><small>누군가와 마음이 이어졌어요. 1:1 대화에서 만나 보세요.</small></span></div>` : "";
+    const guide = howto("운명의 실", "3:3 대화가 끝나고 1:1 대화 전에, 마음에 든 이성 <b>1명에게 익명</b>으로 보내는 결의 실이에요. 한 번만 보낼 수 있고 보낸 뒤에는 바꿀 수 없어요. 받은 실은 누가 보냈는지 <b>끝까지 알려지지 않아요</b>.");
     let sendBox;
     if (T.sent) sendBox = `<section class="panel"><h2>내가 보낸 실</h2><p><b>${T.sent.to_number}번 ${esc(T.sent.to_name)}</b> 님에게 보냈어요.</p><blockquote class="msg">${esc(T.sent.message)}</blockquote><p class="sub" style="font-size:12.5px">한 번 보낸 실은 바꿀 수 없어요. 상대에게는 보낸 사람이 알려지지 않아요.</p></section>`;
     else if (!T.open) sendBox = `<div class="empty"><b>실 보내기가 아직 닫혀 있어요</b><p>진행자가 열면 화면에 알려 드려요. 3:3 대화가 끝난 뒤에 열려요.</p></div>`;
@@ -297,7 +294,7 @@
     const recv = T.received.length
       ? `<div class="sec-title"><h2>나에게 온 실</h2><span>${T.received.length}개</span></div>${T.received.map((r) => `<article class="res thread"><div class="who">${YARN(false)}<span>누군가 보낸 실</span></div><blockquote class="msg">${esc(r.message)}</blockquote><p class="gentle">누가 보냈는지는 비밀이에요.</p></article>`).join("")}`
       : `<p class="note">아직 받은 실이 없어요. 오면 바로 알려 드려요.</p>`;
-    return `${guide}${knotBanner}${sendBox}${recv}`;
+    return `${guide}${sendBox}${recv}`;
   }
 
   /* ───────── 뷰: 대화 카드 (덱) ───────── */

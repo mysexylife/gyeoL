@@ -332,7 +332,6 @@
         const tgt = sent ? s.people.find((x) => x.id === sent.to) : null;
         return {
           open: !!s.rounds[u.round].threads_open,
-          knot: !!sent && all.some((x) => x.from === sent.to && x.to === u.id),
           sent: sent ? { to_number: tgt.number, to_name: tgt.name, message: sent.message } : null,
           received: all.filter((x) => x.to === u.id).sort((a, b) => a.created - b.created).map((x) => ({ message: x.message, created_at: new Date(x.created).toISOString() })),
         };
