@@ -638,3 +638,6 @@ button.brand { background: none; border: 0; padding: 4px 0; cursor: pointer; -we
 .knot span { display: grid; gap: 2px; }
 .knot small { font-size: 13px; font-weight: 500; opacity: .85; }
 .pkfield label small { display: block; font-weight: 400; color: var(--muted); }
+
+/* 진행자 화면: 하단 탭에 가려지지 않게 맨 아래 여백을 확보한다(.wrap.wide 의 48px 이 덮어쓰던 문제) */
+.wrap.wide.admin-main { padding-bottom: calc(140px + env(safe-area-inset-bottom, 0px)); }
