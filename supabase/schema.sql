@@ -847,13 +847,14 @@ begin
     select * into tgt from public.participants where id = sent.to_id;
     knot := exists (select 1 from public.threads b where b.from_id = sent.to_id and b.to_id = me.id);
   end if;
+  -- 매듭 여부만 알려 준다. 어떤 실이 매듭이 되었는지(받은 실 중 어느 것인지)는 표시하지 않는다.
   return jsonb_build_object(
     'open', coalesce(tro, false),
+    'knot', knot,
     'sent', case when sent.id is null then null else jsonb_build_object(
-      'to_number', tgt.number, 'to_name', tgt.name, 'message', sent.message, 'knot', knot) end,
+      'to_number', tgt.number, 'to_name', tgt.name, 'message', sent.message) end,
     'received', coalesce((
-      select jsonb_agg(jsonb_build_object('message', t.message, 'created_at', t.created_at,
-        'knot', (sent.id is not null and t.from_id = sent.to_id)) order by t.created_at)
+      select jsonb_agg(jsonb_build_object('message', t.message, 'created_at', t.created_at) order by t.created_at)
       from public.threads t where t.to_id = me.id), '[]'::jsonb));
 end $$;
 

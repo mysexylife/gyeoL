@@ -627,3 +627,13 @@ button.brand { background: none; border: 0; padding: 4px 0; cursor: pointer; -we
 .knot { display: grid; gap: 2px; padding: 14px 16px; border-radius: 14px; background: var(--ok-soft); color: var(--ok); }
 .knot b { font: 700 18px/1.3 var(--serif); }
 .pkfield textarea { width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; font: inherit; background: var(--surface); resize: vertical; }
+
+/* 실타래 아이콘 */
+.yarn { display: block; width: 44px; height: 44px; flex: none; }
+.popico .yarn { width: 72px; height: 72px; margin: 0 auto; }
+.res.thread .who { display: flex; align-items: center; gap: 10px; }
+.res.thread .who .yarn { width: 34px; height: 34px; }
+.knot { display: flex; align-items: center; gap: 12px; }
+.knot .yarn { width: 52px; height: 52px; }
+.knot span { display: grid; gap: 2px; }
+.knot small { font-size: 13px; font-weight: 500; opacity: .85; }
