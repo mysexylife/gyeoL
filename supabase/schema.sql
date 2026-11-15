@@ -153,6 +153,22 @@ create table if not exists public.accounts (
 );
 alter table public.accounts enable row level security;
 
+-- 문자 발송 기록: 같은 사람에게 같은 종류를 두 번 보내지 않도록 성공한 건을 남긴다.
+-- (Edge Function 이 서비스 키로 쓴다. 회차를 초기화하면 함께 지워진다.)
+create table if not exists public.sms_log (
+  id             uuid primary key default gen_random_uuid(),
+  round_id       text not null,
+  participant_id uuid references public.participants(id) on delete set null,
+  phone          text not null,
+  kind           text not null default 'result',
+  status         text not null check (status in ('sent','failed')),
+  error          text,
+  created_at     timestamptz not null default now()
+);
+create unique index if not exists sms_sent_once on public.sms_log (participant_id, kind) where status = 'sent';
+create index if not exists sms_log_round_idx on public.sms_log (round_id);
+alter table public.sms_log enable row level security;
+
 -- 로그인 상태(브라우저에 저장되는 임의 토큰)
 create table if not exists public.sessions (
   token          uuid primary key default gen_random_uuid(),
@@ -499,6 +515,7 @@ begin
   return jsonb_build_object(
     'round', (select jsonb_build_object('id', id, 'label', label, 'results_open', results_open, 'threads_open', threads_open) from public.rounds where id = p_round),
     'results_open', coalesce((select results_open from public.rounds where id = p_round), false),
+    'sms_sent', (select count(*) from public.sms_log where round_id = p_round and kind = 'result' and status = 'sent'),
     'participants', (
       select coalesce(jsonb_agg(jsonb_build_object(
         'id', p.id, 'number', p.number, 'gender', p.gender, 'name', p.name, 'phone', p.phone,
@@ -593,6 +610,7 @@ begin
   perform public._check_admin(p_pin);
   delete from public.participants where round_id = p_round;
   update public.applicants set assigned_round = null where assigned_round = p_round;
+  delete from public.sms_log where round_id = p_round;
   update public.rounds set results_open = false, threads_open = false where id = p_round;
 end $$;
 
