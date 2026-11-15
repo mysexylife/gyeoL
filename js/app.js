@@ -215,25 +215,36 @@
       <button class="btn" data-act="submit" ${S.busy ? "disabled" : ""}>${S.busy ? "제출 중…" : S.mine.submitted ? "수정 내용 제출" : "선택하고 제출하기"}</button>`;
   }
 
+  // 연락처 저장용 vCard(.vcf): 열면 휴대폰 연락처 앱에서 바로 저장할 수 있다
+  function vcard(name, phone) {
+    const n = String(name || "").replace(/[\\;,\r\n]/g, " ").trim();
+    return ["BEGIN:VCARD", "VERSION:3.0", "FN:" + n, "N:" + n + ";;;;", "TEL;TYPE=CELL:" + phone, "NOTE:gyeoL 로테이션 소개팅", "END:VCARD"].join("\r\n");
+  }
+  const contactBtns = (r) => `<div class="acts"><button class="btn sm ghost" data-act="copy" data-v="${esc(r.phone)}">번호 복사</button><button class="btn sm ghost" data-act="save-contact" data-name="${esc(r.name)}" data-phone="${esc(r.phone)}">연락처 저장</button></div>`;
+
+  // 오늘 와 줘서 고맙다는 인사와 함께 다음 회차 소식(인스타그램)을 알리는 카드. 매칭 결과 위에 보여준다
+  function thanksCard() {
+    return `<section class="panel follow"><h2>오늘 함께해 주셔서 감사해요 :)</h2>
+      <p class="sub">다음 회차 소식과 콘텐츠는 인스타그램 <b>@gyeol.meet_official</b> 을 팔로우하면 확인하실 수 있어요. 주변 솔로분들께도 소개해 주세요 💌</p>
+      <a class="btn" href="https://www.instagram.com/gyeol.meet_official/" target="_blank" rel="noopener noreferrer">인스타그램 보러 가기</a></section>`;
+  }
+
   function resultView() {
     const res = S.result || [];
     const hits = res.filter((r) => r.mutual).length;
-    return `<div class="sec-title"><h2>매칭 결과</h2><span>서로 선택 ${hits}명</span></div>
+    return `${thanksCard()}
+      <div class="sec-title"><h2>매칭 결과</h2><span>매칭 성공 ${hits}명</span></div>
       ${res.length === 0 ? `<div class="empty"><b>선택한 사람이 없어요</b><p>다음 모임에서 또 만나요.</p></div>` : ""}
       ${res.map((r) => !r.resolved ? `<article class="res"><div class="who"><b>?</b><span>${esc(r.input)}</span><span class="badge">확인 필요</span></div><p class="gentle">적어 주신 내용과 맞는 참가자를 찾지 못했어요. 운영진에게 알려 주세요.</p></article>` : r.mutual ? `<article class="res hit">
-          <div class="who"><b>${r.number}번</b><span>${esc(r.name)}</span><span class="badge">서로 선택</span></div>
+          <div class="who"><b>${r.number}번</b><span>${esc(r.name)}</span><span class="badge">매칭 성공</span></div>
           <p>${esc([r.age_label, splitSchool(r.school).filter(Boolean).join(" ")].filter(Boolean).join(" · "))}</p>
           <div class="phone">${esc(fmtPhone(r.phone))}</div>
-          <div class="acts"><button class="btn sm ghost" data-act="copy" data-v="${esc(r.phone)}">번호 복사</button><a class="btn sm ghost" style="text-decoration:none" href="tel:${esc(r.phone)}">전화 걸기</a></div>
+          ${contactBtns(r)}
         </article>` : `<article class="res">
-          <div class="who"><b>${r.number}번</b><span>${esc(r.name)}</span><span class="badge">연결 안 됨</span></div>
-          <p class="gentle">이번에는 서로의 선택이 맞지 않았어요. 만나 주셔서 고마워요.</p></article>`).join("")}
-      ${hits === 0 && res.length ? `<p class="note">연결되지 않아도 괜찮아요. 오늘 만난 시간은 그대로 남아요.</p>` : ""}
-      ${receivedView()}${paidView()}
-      <section class="panel follow"><h2>다음 회차 소식</h2>
-        <p class="sub">인스타그램 <b>@gyeol.meet_official</b> 을 팔로우하면 다음 회차 소식과 콘텐츠를 확인하실 수 있어요.</p>
-        <p class="sub">주변 솔로분들께도 소개해 주세요 :)</p>
-        <a class="btn" href="https://www.instagram.com/gyeol.meet_official/" target="_blank" rel="noopener noreferrer">인스타그램 보러 가기</a></section>`;
+          <div class="who"><b>${r.number}번</b><span>${esc(r.name)}</span><span class="badge">매칭 실패</span></div>
+          <p class="gentle">이번에는 인연이 닿지 않았어요. 함께해 주셔서 고마워요.</p></article>`).join("")}
+      ${hits === 0 && res.length ? `<p class="note">매칭이 되지 않았어도 오늘의 만남은 소중한 경험이에요. 다음 인연도 응원할게요.</p>` : ""}
+      ${receivedView()}${paidView()}`;
   }
 
 
@@ -248,7 +259,7 @@
         <div class="phone">${esc(fmtPhone(r.phone))}</div>
         ${r.message ? `<blockquote class="msg">${esc(r.message)}</blockquote>` : ""}
         <p class="gentle">연락은 하지 않으셔도 괜찮아요. 연락할지는 자유롭게 정해요.</p>
-        <div class="acts"><button class="btn sm ghost" data-act="copy" data-v="${esc(r.phone)}">번호 복사</button><a class="btn sm ghost" style="text-decoration:none" href="tel:${esc(r.phone)}">전화 걸기</a></div></article>`).join("")}`;
+        ${contactBtns(r)}</article>`).join("")}`;
   }
   function paidState(q, openAttrs, label, price) {
     if (q && q.status === "pending") return `<span class="tag n">입금 확인 대기</span>`;
@@ -279,7 +290,7 @@
         <div class="toolbar"><button class="btn ghost sm" data-act="pay-cancel">취소</button><button class="btn sm" data-act="pay-submit" ${S.busy ? "disabled" : ""}>신청하기</button></div></section>` : "";
     return `<div class="sec-title"><h2>추가 서비스</h2><span>유료 · 계좌이체</span></div>
       <section class="panel"><h2>득표수 확인</h2>${voteBody}</section>
-      ${targets.length ? `<section class="panel"><h2>연락처 전달</h2><p class="sub" style="font-size:13px">서로 선택하지 못한 분에게도 내 이름과 연락처를 전달할 수 있어요. 받은 분은 연락할지 자유롭게 정해요. 1명당 ${won(P.prices.contact)}.</p><div class="rows">${contactRows}</div></section>` : ""}
+      ${targets.length ? `<section class="panel"><h2>연락처 전달</h2><p class="sub" style="font-size:13px">매칭되지 않은 분에게도 내 이름과 연락처를 전달할 수 있어요. 받은 분은 연락할지 자유롭게 정해요. 1명당 ${won(P.prices.contact)}.</p><div class="rows">${contactRows}</div></section>` : ""}
       ${form}
       <p class="note">입금 확인은 진행자가 직접 해요. 승인되면 이 화면에 바로 나타나요.</p>`;
   }
@@ -515,6 +526,13 @@
         S.threads = await api.getThreads(); S.threadForm = { to: "", message: "", armed: false };
         toast("실을 보냈어요.");
       });
+    },
+    "save-contact": (t) => {
+      const blob = new Blob([vcard(t.dataset.name, t.dataset.phone)], { type: "text/vcard;charset=utf-8" });
+      const url = URL.createObjectURL(blob), el = document.createElement("a");
+      el.href = url; el.download = "gyeol-contact.vcf"; document.body.appendChild(el); el.click();
+      setTimeout(() => { URL.revokeObjectURL(url); el.remove(); }, 800);
+      toast("연락처 파일을 만들었어요. 열어서 저장해 주세요.");
     },
     copy: async (t) => {
       try { await navigator.clipboard.writeText(t.dataset.v); toast("번호를 복사했어요."); }
