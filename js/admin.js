@@ -6,7 +6,7 @@
   const $app = document.getElementById("app");
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
-  const S = { pin: "", data: null, paid: [], thr: [], applicants: [], appl: { date: "", gender: "", showAssigned: false, sel: {}, target: "", newdate: "", newtime: "" }, error: "", confirm: "", busy: false, round: "", rounds: [], tab: "picks", open: {}, openPick: {}, pickEdit: {}, onlyBad: false,
+  const S = { pin: "", data: null, paid: [], thr: [], applicants: [], appl: { date: "", gender: "", showAssigned: false, sel: {}, target: "", newdate: "", newtime: "" }, error: "", confirm: "", busy: false, round: "", rounds: [], tab: "picks", open: {}, openPick: {}, pickEdit: {}, onlyBad: false, onlyAbsent: false,
     add: { open: false, editing: false, round: "", newdate: "", newtime: "", name: "", gender: "", phone: "", number: "", age: "", school: "", mbti: "", hobby: "" },
     imp: { dest: "applicants", text: "", fileName: "", table: null, map: {}, date: "", round: "", newdate: "", newtime: "", numberedOnly: false, onlyDate: true, prune: false, done: null, error: "" } };
   try { S.pin = sessionStorage.getItem("rn_admin_pin") || ""; S.round = sessionStorage.getItem("rn_admin_round") || ""; S.tab = sessionStorage.getItem("rn_admin_tab") || "picks"; } catch (e) { /* 저장소 사용 불가 */ }
@@ -217,13 +217,13 @@
     if (!ppl.length) return `<div class="empty"><b>이 회차에는 아직 명단이 없어요</b><p>위의 '명단 가져오기'에서 구글 시트를 불러오세요.</p></div>`;
     const chev = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>`;
     return `<div class="plist" role="list">
-      <div class="phead"><span class="pn">번호</span><span>이름</span><span>성별</span><span>연락처</span><span></span></div>
+      <div class="phead chk"><span>도착</span><span class="pn">번호</span><span>이름</span><span>성별</span><span>연락처</span><span></span></div>
       ${ppl.map((p) => {
         const open = !!S.open[p.id];
         const rows = [["나이", p.age_label], ["대학·학과", splitSchool(p.school).filter(Boolean).join(" · ")], ["MBTI", p.mbti], ["취미", p.hobby]]
           .map(([k, v]) => `<div><dt>${k}</dt><dd>${esc(v || "-")}</dd></div>`).join("");
-        return `<div class="prow ${open ? "open" : ""}" role="listitem">
-          <div class="pmain"><span class="pn">${p.number}</span><span class="pnm">${esc(p.name)}</span><span class="pg g-${p.gender}">${p.gender === "M" ? "남" : "여"}</span><span class="pph">${esc(fmtPhone(p.phone))}</span>
+        return `<div class="prow ${open ? "open" : ""} ${p.arrived ? "here" : ""}" role="listitem">
+          <div class="pmain chk"><label class="apck"><input type="checkbox" data-arrive="${p.id}" ${p.arrived ? "checked" : ""} aria-label="${esc(p.name)} 도착 확인"></label><span class="pn">${p.number}</span><span class="pnm">${esc(p.name)}</span><span class="pg g-${p.gender}">${p.gender === "M" ? "남" : "여"}</span><span class="pph">${esc(fmtPhone(p.phone))}</span>
             <button class="ptog" data-act="toggle" data-id="${p.id}" aria-expanded="${open}" aria-label="${esc(p.name)} 자세히 ${open ? "접기" : "보기"}">${chev}</button></div>
           ${open ? `<dl class="pdet">${rows}<div><dt>설문</dt><dd><span class="tag ${p.submitted ? "y" : "n"}">${p.submitted ? "제출" : "대기"}</span></dd></div>
             <div class="pact"><label>번호 <input class="numin" type="number" min="1" inputmode="numeric" data-id="${p.id}" data-old="${p.number}" value="${p.number}" aria-label="${esc(p.name)} 번호"></label>
@@ -333,14 +333,20 @@
   // [참가자 현황] 통계 + 목록(컴팩트) + CSV + 날짜 초기화
   function tabPeople(d, rnd) {
     const ppl = d.participants, men = ppl.filter((p) => p.gender === "M"), women = ppl.filter((p) => p.gender === "F");
-    const submitted = ppl.filter((p) => p.submitted).length;
+    const submitted = ppl.filter((p) => p.submitted).length, arrived = ppl.filter((p) => p.arrived).length;
+    const am = men.filter((p) => p.arrived).length, af = women.filter((p) => p.arrived).length;
+    const shown = S.onlyAbsent ? ppl.filter((p) => !p.arrived) : ppl;
     return `<section class="stats s3">
         <div class="stat"><small>남성 총원</small><b>${men.length}<em>명</em></b></div>
         <div class="stat"><small>여성 총원</small><b>${women.length}<em>명</em></b></div>
         <div class="stat"><small>선택·설문 제출</small><b>${submitted}<em>/ ${ppl.length}명</em></b></div>
       </section>
+      <section class="stats s3"><div class="stat"><small>도착 확인</small><b>${arrived}<em>/ ${ppl.length}명</em></b></div>
+        <div class="stat"><small>남성 도착</small><b>${am}<em>/ ${men.length}명</em></b></div>
+        <div class="stat"><small>여성 도착</small><b>${af}<em>/ ${women.length}명</em></b></div></section>
       <section style="display:grid;gap:10px"><div class="toolbar"><div class="sec-title"><h2>참가자</h2><span>연락처는 진행자만 볼 수 있어요</span></div><button class="btn sm ghost" data-act="csv-people">참가자 CSV</button></div>
-        ${participantList(ppl)}</section>
+        <label class="ck"><input type="checkbox" id="only-absent" ${S.onlyAbsent ? "checked" : ""}> 아직 도착하지 않은 사람만 보기 (${ppl.length - arrived}명)</label>
+        ${participantList(shown)}</section>
       <section class="panel"><h2>${esc(roundLabel(rnd.id))} 데이터 초기화</h2><p class="sub" style="font-size:13px">이 날짜의 모든 참가자, 메모, 선택, 설문을 <b>지우고</b> 결과 공개도 닫습니다. 다른 날짜는 그대로예요. 지난 회차 기록은 지우지 않는 한 계속 저장돼 있으니, 정말 필요할 때만 쓰세요. 되돌릴 수 없어요. 먼저 CSV를 내려받으세요.</p>
         <button class="btn danger sm" style="justify-self:start" data-act="reset">${S.confirm === "reset" ? "정말 모두 삭제합니다" : "이 날짜 데이터 초기화"}</button></section>`;
   }
@@ -449,8 +455,8 @@
     refresh: () => run(async () => {}),
     tab: (t) => { S.tab = t.dataset.v; S.confirm = ""; try { sessionStorage.setItem("rn_admin_tab", S.tab); } catch (e) { /* 무시 */ } render(); window.scrollTo(0, 0); },
     "csv-people": () => {
-      const rows = [["번호", "성별", "이름", "연락처", "나이", "대학·학과", "MBTI", "취미", "설문 제출"]];
-      S.data.participants.forEach((p) => rows.push([p.number, p.gender === "M" ? "남" : "여", p.name, fmtPhone(p.phone), p.age_label || "", p.school || "", p.mbti || "", p.hobby || "", p.submitted ? "제출" : ""]));
+      const rows = [["번호", "성별", "이름", "연락처", "나이", "대학·학과", "MBTI", "취미", "도착", "설문 제출"]];
+      S.data.participants.forEach((p) => rows.push([p.number, p.gender === "M" ? "남" : "여", p.name, fmtPhone(p.phone), p.age_label || "", p.school || "", p.mbti || "", p.hobby || "", p.arrived ? "도착" : "", p.submitted ? "제출" : ""]));
       downloadCSV("participants-" + S.round + ".csv", rows);
     },
     "pick-toggle": (t) => { S.openPick[t.dataset.id] = !S.openPick[t.dataset.id]; delete S.pickEdit[t.dataset.id]; render(); },
@@ -615,6 +621,13 @@
     if (t.id === "imp-onlydate") { im.onlyDate = t.checked; render(); return; }
     if (t.id === "imp-numbered") { im.numberedOnly = t.checked; render(); return; }
     if (t.id === "imp-prune") { im.prune = t.checked; S.confirm = ""; render(); return; }
+    if (t.dataset && t.dataset.arrive) {   // 도착 체크: 화면은 바로 바꾸고 서버에 저장한다
+      const p = S.data.participants.find((x) => x.id === t.dataset.arrive); if (!p) return;
+      p.arrived = t.checked; render();
+      api.admin.setArrived(S.pin, p.id, t.checked).catch((e) => { p.arrived = !t.checked; render(); toast(friendly(e)); });
+      return;
+    }
+    if (t.id === "only-absent") { S.onlyAbsent = t.checked; render(); return; }
     if (t.id === "only-bad") { S.onlyBad = t.checked; render(); }
     else if (t.dataset && t.dataset.pickFor) {
       const id = t.dataset.pickFor;

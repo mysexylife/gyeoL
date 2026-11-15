@@ -66,6 +66,7 @@ create table if not exists public.participants (
   constraint participants_round_gender_number_key unique (round_id, gender, number) deferrable initially deferred
 );
 create index if not exists participants_phone_idx on public.participants (phone);
+alter table public.participants add column if not exists arrived_at timestamptz;   -- 현장 도착 확인(진행자가 체크)
 
 -- 회차 id 를 'YYYY-MM-DD' 로 통일한다. (v4 까지는 '11/8' 처럼 연도 없이 저장했다)
 -- 이미 만들어진 회차는 만든 해를 붙여 옮기고, 참가자도 함께 옮긴다. 여러 번 실행해도 안전하다.
@@ -459,7 +460,8 @@ begin
       select coalesce(jsonb_agg(jsonb_build_object(
         'id', p.id, 'number', p.number, 'gender', p.gender, 'name', p.name, 'phone', p.phone,
         'age_label', p.age_label, 'school', p.school, 'mbti', p.mbti, 'hobby', p.hobby,
-        'submitted', exists (select 1 from public.surveys s where s.participant_id = p.id)
+        'submitted', exists (select 1 from public.surveys s where s.participant_id = p.id),
+        'arrived', p.arrived_at is not null
       ) order by p.gender desc, p.number), '[]'::jsonb) from public.participants p where p.round_id = p_round),
     -- 참가자별 최종 선택: target_id 가 없으면 명단에서 못 찾은 입력(진행자가 맞춰야 함)
     'picks', (
@@ -886,4 +888,12 @@ returns void language plpgsql security definer set search_path = public as $$
 begin
   perform public._check_admin(p_pin);
   delete from public.threads where id = p_id;
+end $$;
+
+-- 현장 도착 확인(체크/해제). 가져오기·배정으로 정보가 갱신되어도 도착 상태는 유지된다.
+create or replace function public.admin_set_arrived(p_pin text, p_id uuid, p_arrived boolean)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  perform public._check_admin(p_pin);
+  update public.participants set arrived_at = case when coalesce(p_arrived, false) then coalesce(arrived_at, now()) else null end where id = p_id;
 end $$;

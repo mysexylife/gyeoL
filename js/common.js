@@ -182,6 +182,7 @@
         setNumber: (pin, id, n) => rpc("admin_set_number", { p_pin: pin, p_id: id, p_number: n }),
         setPicks: (pin, participantId, targetIds) => rpc("admin_set_picks", { p_pin: pin, p_participant: participantId, p_targets: targetIds }),
         remove: (pin, id) => rpc("admin_remove", { p_pin: pin, p_id: id }),
+        setArrived: (pin, id, arrived) => rpc("admin_set_arrived", { p_pin: pin, p_id: id, p_arrived: !!arrived }),
         reset: (pin, round) => rpc("admin_reset", { p_pin: pin, p_round: round }),
         import: (pin, round, label, rows, prune) => rpc("admin_import", { p_pin: pin, p_round: round, p_label: label, p_rows: rows, p_prune: !!prune }),
         applicants: (pin) => rpc("admin_applicants", { p_pin: pin }),
@@ -409,7 +410,7 @@
           return {
             round: r ? { id: round, label: r.label, results_open: !!r.results_open, threads_open: !!r.threads_open } : null,
             results_open: r ? !!r.results_open : false,
-            participants: here.map((p) => ({ id: p.id, number: p.number, gender: p.gender, name: p.name, phone: p.phone, age_label: p.age_label, school: p.school, mbti: p.mbti, hobby: p.hobby, submitted: !!s.surveys[p.id] }))
+            participants: here.map((p) => ({ id: p.id, number: p.number, gender: p.gender, name: p.name, phone: p.phone, age_label: p.age_label, school: p.school, mbti: p.mbti, hobby: p.hobby, submitted: !!s.surveys[p.id], arrived: !!p.arrived }))
               .sort((a, b) => (a.gender === b.gender ? a.number - b.number : a.gender === "M" ? -1 : 1)),
             matches, picks,
             surveys: here.filter((p) => s.surveys[p.id]).map((p) => ({ gender: p.gender, answers: s.surveys[p.id] })),
@@ -431,6 +432,7 @@
           if (new Set(targets).size !== targets.length || targets.some((id) => { const t = s.people.find((x) => x.id === id); return !t || t.round !== me2.round || t.gender === me2.gender; })) fail("invalid_target");
           s.picks[pid] = targets.map((id) => ({ target: id, input: "" }));
         }),
+        setArrived: (pin, id, arrived) => op((s) => { checkAdmin(pin); const p = s.people.find((x) => x.id === id); if (p) p.arrived = !!arrived; }),
         remove: (pin, id) => op((s) => {
           checkAdmin(pin);
           const gp = s.people.find((u) => u.id === id);
