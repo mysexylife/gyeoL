@@ -6,6 +6,7 @@
  * "스프레드시트에서 · 양식 제출 시" 로 추가하세요. 자세한 순서는 README 의 '구글폼 연동' 참고.
  *
  * 폼이 제출될 때마다 신청자 한 명이 앱의 '신청자' 명단에 들어갑니다.
+ * 이미 쌓여 있는 응답은 `syncAll` 을 한 번 실행하면 한꺼번에 들어갑니다(같은 연락처는 정보만 갱신되어 여러 번 실행해도 안전).
  * 이상형·입금·추가요청·동의 항목은 읽지도 보내지도 않습니다. 사진은 드라이브 링크만 보냅니다.
  */
 const SUPABASE_URL = "https://pjferikmuhqxnzoukokc.supabase.co";
@@ -19,15 +20,40 @@ function onFormSubmit(e) {
     console.warn("필수 항목(연락처·이름·성별)이 비어 있어 건너뜁니다.", JSON.stringify({ name: row.name }));
     return;
   }
+  console.log("전송 완료", send(row));
+}
+
+// 응답 시트에 이미 있는 모든 행을 앱으로 보낸다. 처음 한 번 직접 실행하세요(상단 함수 선택 → syncAll → 실행).
+// 시간 기반 트리거(예: 5분마다)로 걸어 두면 시트를 직접 고친 내용도 따라갑니다.
+function syncAll() {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheets()[0];   // 첫 번째 탭 = 폼 응답
+  const values = sheet.getDataRange().getDisplayValues();
+  if (values.length < 2) return console.log("보낼 응답이 없습니다.");
+  const headers = values[0], rows = [];
+  for (let i = 1; i < values.length; i++) {
+    const nv = {};
+    headers.forEach((h, c) => {
+      const v = String(values[i][c] == null ? "" : values[i][c]);
+      if (!nv[h] || !nv[h][0]) nv[h] = [v];   // 같은 제목의 열이 둘이면 값이 있는 쪽을 쓴다
+    });
+    const row = buildRow(nv);
+    if (row.phone && row.name && row.gender) rows.push(row);
+  }
+  let total = { inserted: 0, updated: 0, skipped: 0 };
+  for (let i = 0; i < rows.length; i += 100) {
+    const r = JSON.parse(send(rows.slice(i, i + 100)));
+    total.inserted += r.inserted; total.updated += r.updated; total.skipped += r.skipped;
+  }
+  console.log("전체 " + rows.length + "건 전송 · 추가 " + total.inserted + " · 갱신 " + total.updated + " · 건너뜀 " + total.skipped);
+}
+
+function send(payloadRow) {
   const res = UrlFetchApp.fetch(SUPABASE_URL + "/rest/v1/rpc/form_submit", {
-    method: "post",
-    contentType: "application/json",
-    headers: { apikey: ANON_KEY },
-    payload: JSON.stringify({ p_secret: SECRET, p_row: row }),
-    muteHttpExceptions: true,
+    method: "post", contentType: "application/json", headers: { apikey: ANON_KEY },
+    payload: JSON.stringify({ p_secret: SECRET, p_row: payloadRow }), muteHttpExceptions: true,
   });
   if (res.getResponseCode() >= 300) throw new Error("앱 전송 실패 " + res.getResponseCode() + " " + res.getContentText());
-  console.log("전송 완료", res.getContentText());
+  return res.getContentText();
 }
 
 // 시트의 머리글(질문 제목)을 보고 항목을 찾아 앱이 받는 형식으로 정리한다
