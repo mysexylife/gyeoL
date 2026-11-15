@@ -107,6 +107,21 @@
 - 연동을 켜기 전에 받은 응답은 Apps Script 편집기 위쪽 함수 선택에서 **`syncAll`** 을 고르고 ▶ 실행을 한 번 누르면 한꺼번에 들어갑니다(같은 연락처는 정보만 갱신되어 여러 번 해도 안전). `syncAll` 을 5분마다 도는 시간 트리거로 걸어 두면 시트를 직접 고친 내용도 따라갑니다.
 - 연동을 끄려면 `update app_settings set form_secret = '' where id = 1;`
 
+## 결과 안내 문자 (솔라피)
+
+결과를 공개한 뒤 진행자 화면 **최종 선택 → 결과 안내 문자**의 버튼으로 참가자 전원에게 "최종 선택 결과가 나왔어요 + 로그인 링크" 문자를 보냅니다. 결과·연락처는 문자에 담지 않고, 이미 받은 사람에게는 다시 보내지 않습니다.
+
+1. [솔라피](https://solapi.com)에 가입하고 **발신번호를 등록·인증**합니다(문자는 사전에 인증된 번호로만 보낼 수 있습니다). 발송에 쓸 금액을 충전합니다.
+2. 솔라피 개발자 설정에서 **API Key / API Secret** 을 만듭니다.
+3. Supabase → **Edge Functions → Deploy a new function(Via Editor)** 에서 이름을 `send-result-sms` 로 하고 `supabase/functions/send-result-sms/index.ts` 내용을 붙여넣어 배포합니다. 함수 설정에서 **Verify JWT 는 끕니다**(이 앱의 공개 키는 JWT 가 아니라서. 대신 함수 안에서 진행자 마스터키를 확인합니다).
+4. Supabase → Edge Functions → **Secrets** 에 아래 4개를 저장합니다.
+   - `SOLAPI_API_KEY`, `SOLAPI_API_SECRET`
+   - `SOLAPI_SENDER` : 인증된 발신번호(숫자만)
+   - `APP_URL` : 참가자 입장 주소(예: `https://gyeol.rotationdating.workers.dev`)
+5. 진행자 화면에서 먼저 **테스트 1건**을 내 번호로 보내 문자가 오는지 확인한 뒤, 행사에서 **결과 안내 문자 보내기**를 누릅니다.
+
+문안은 `supabase/functions/send-result-sms/index.ts` 의 `buildText` 와 진행자 화면(`js/admin.js` 의 `smsText`)에 있습니다. 바꿀 때는 두 곳을 같이 고치세요. 문자 서비스를 바꾸려면 `sendBatch()` 만 바꾸면 됩니다.
+
 ## 개인정보
 
 - 브라우저는 테이블을 직접 읽지 못하고, 정해진 함수로만 접근합니다. 연락처는 `get_result()` 가 **서로 선택한 경우에만** 돌려줍니다.

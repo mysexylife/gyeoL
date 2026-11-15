@@ -1,12 +1,12 @@
 /* 진행자 화면: 단계 전환, 참가 현황, 매칭, 설문 집계, CSV */
 (() => {
   const api = window.api;
-  const { SURVEY, MAX_PICKS, friendly, splitSchool, fmtPhone, normPhone, roundLabel, roundTag, roundDate, mkRound, isRoundId, toRoundId, todayISO } = window.RN;
+  const { SURVEY, MAX_PICKS, friendly, splitSchool, fmtPhone, normPhone, roundLabel, roundTag, roundDate, mkRound, isRoundId, toRoundId, todayISO, digits } = window.RN;
   const Roster = window.Roster;   // 나이·MBTI 정리에만 쓴다 (명단 가져오기는 쓰지 않음)
   const $app = document.getElementById("app");
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
-  const S = { pin: "", data: null, paid: [], thr: [], applicants: [], appl: { date: "", gender: "", showAssigned: false, sel: {}, target: "", newdate: "", newtime: "" }, error: "", confirm: "", busy: false, round: "", rounds: [], tab: "picks", open: {}, openPick: {}, pickEdit: {}, onlyBad: false, onlyAbsent: false,
+  const S = { pin: "", data: null, paid: [], thr: [], applicants: [], appl: { date: "", gender: "", showAssigned: false, sel: {}, target: "", newdate: "", newtime: "" }, error: "", confirm: "", busy: false, round: "", rounds: [], tab: "picks", open: {}, openPick: {}, pickEdit: {}, onlyBad: false, onlyAbsent: false, sms: { test: "", last: null },
     add: { open: false, editing: false, round: "", newdate: "", newtime: "", name: "", gender: "", phone: "", number: "", age: "", school: "", mbti: "", hobby: "" },
     imp: { dest: "applicants", text: "", fileName: "", table: null, map: {}, date: "", round: "", newdate: "", newtime: "", numberedOnly: false, onlyDate: true, prune: false, done: null, error: "" } };
   try { S.pin = sessionStorage.getItem("rn_admin_pin") || ""; S.round = sessionStorage.getItem("rn_admin_round") || ""; S.tab = sessionStorage.getItem("rn_admin_tab") || "picks"; } catch (e) { /* 저장소 사용 불가 */ }
@@ -301,6 +301,24 @@
       ${list.length ? `<div class="rows">${list.map((t) => `<div class="row paidrow ${t.knot ? "" : ""}"><span class="rm"><b>${t.from_gender === "M" ? "남" : "여"} ${t.from_number}번 ${esc(t.from_name)} → ${t.to_number}번 ${esc(t.to_name)}</b>${t.knot ? ` <span class="tag y">매듭</span>` : ""}<blockquote class="msg">${esc(t.message)}</blockquote></span><span class="pbtns"><button class="link" data-act="thread-del" data-id="${t.id}">${S.confirm === "td" + t.id ? "정말 삭제" : "삭제"}</button></span></div>`).join("")}</div>` : ""}</section>`;
   }
 
+  // [결과 안내 문자] 결과를 공개한 뒤 참가자 전원에게 '결과가 나왔어요 + 로그인 링크' 문자를 보낸다(결과·연락처는 문자에 담지 않는다)
+  // 아래 문안은 supabase/functions/send-result-sms/index.ts 의 buildText 와 같아야 한다.
+  function smsText() {
+    return ["안녕하세요, 로테이션 소개팅 [결] 운영진입니다 :)", "오늘 참여해 주셔서 감사합니다!", "", "최종 선택 결과가 나왔어요.", "아래 링크에서 로그인 후 최종선택 탭에서 확인해 주세요.", entryUrl(), "", "인스타그램을 팔로우하면 다음 회차 소식과 콘텐츠를 확인하실 수 있어요ㅎㅎ", "→ @gyeol.meet_official"].join("\n");
+  }
+  function smsPanel(d) {
+    const ppl = d.participants, sent = d.sms_sent || 0, open = !!d.results_open, last = S.sms.last;
+    const rest = Math.max(0, ppl.length - sent);
+    return `<section class="panel"><h2>결과 안내 문자 <span class="sub">링크만 보내요</span></h2>
+      <p class="sub" style="font-size:13px">결과를 <b>공개한 뒤</b>, 그 회차 참가자에게 "최종 선택 결과가 나왔어요 + 로그인 링크" 문자를 보내요. 매칭 결과와 연락처는 문자에 담기지 않아요. 이미 받은 사람에게는 다시 보내지 않아요.</p>
+      <p class="sum"><b>${sent}명</b> 발송 완료 <span class="sub">/ 참가자 ${ppl.length}명${rest ? ` · 남은 ${rest}명` : ""}</span></p>
+      <details class="smsprev"><summary>보내는 문자 미리 보기</summary><pre>${esc(smsText())}</pre></details>
+      <div class="filters"><label class="mp" for="sms-test"><span>테스트 문자 받을 번호</span><input id="sms-test" type="tel" inputmode="numeric" placeholder="내 휴대폰 번호" value="${esc(S.sms.test)}"></label>
+        <button class="btn sm ghost" data-act="sms-test" ${S.busy ? "disabled" : ""}>테스트 1건 보내기</button></div>
+      <button class="btn" data-act="sms-send" ${!open || S.busy || !rest ? "disabled" : ""}>${!open ? "먼저 결과를 공개해 주세요" : !rest ? "모두 발송했어요" : S.confirm === "sms" ? `한 번 더 눌러 ${rest}명에게 발송` : `결과 안내 문자 보내기 (${rest}명)`}</button>
+      ${last ? `<p class="note">${last.test ? "테스트 문자를 보냈어요." : `이번에 ${last.sent}명에게 보냈어요${last.failed.length ? `, <b>실패 ${last.failed.length}명</b>` : ""}.`}</p>${last.failed.length ? `<ul class="texts">${last.failed.slice(0, 10).map((f) => `<li>${esc(maskPhone(f.to))} · ${esc(f.error)}</li>`).join("")}</ul>` : ""}` : ""}</section>`;
+  }
+
   // [유료 신청] 입금을 확인하고 승인하면 참가자 화면에 득표수/연락처가 열린다
   function paidPanel() {
     const list = S.paid, wait = list.filter((q) => q.status === "pending");
@@ -323,6 +341,7 @@
         <p class="note">공개하면 참가자 화면에 <b>매칭 결과와 연락처</b>가 열리고, 이후엔 선택을 바꿀 수 없어요. 공개 전에 <b>확인 필요 0건</b>인지 확인하세요.</p>
         <div class="resultbar"><span class="tag ${d.results_open ? "y" : "n"}">${d.results_open ? "결과 공개 중" : "아직 비공개"}</span><span class="sub" style="font-size:13px">제출 ${submitted} / ${ppl.length}명 · 매칭 ${d.matches.length}쌍${bad ? ` · <b class="badtxt">확인 필요 ${bad}건</b>` : ""}</span>
           <button class="btn ${d.results_open ? "ghost" : ""}" style="width:auto" data-act="results" ${S.busy ? "disabled" : ""}>${d.results_open ? (S.confirm === "res-off" ? "한 번 더 눌러 공개 취소" : "공개 취소 (다시 제출 받기)") : S.confirm === "res-on" ? "한 번 더 눌러 공개" : "매칭 결과 공개하기"}</button></div></section>
+      ${smsPanel(d)}
       ${paidPanel()}
       ${picksPanel(d)}
       <section style="display:grid;gap:10px"><div class="toolbar"><div class="sec-title"><h2>매칭된 쌍</h2><span>${d.matches.length}쌍</span></div><button class="btn sm ghost" data-act="csv-match">매칭 CSV</button></div>
@@ -592,6 +611,19 @@
       if (S.confirm !== key) return askConfirm(key);
       run(async () => { await api.admin.threadDelete(S.pin, t.dataset.id); toast("실을 삭제했어요. 보낸 사람은 다시 보낼 수 있어요."); });
     },
+    "sms-test": () => {
+      const to = digits(S.sms.test);
+      if (!/^01\d{8,9}$/.test(to)) return toast("테스트 문자를 받을 휴대폰 번호를 정확히 입력해 주세요.");
+      run(async () => { S.sms.last = await api.admin.sendSms(S.pin, S.round, to); toast("테스트 문자를 보냈어요. 휴대폰을 확인해 주세요."); });
+    },
+    "sms-send": () => {
+      if (S.confirm !== "sms") return askConfirm("sms");
+      run(async () => {
+        const r = await api.admin.sendSms(S.pin, S.round, "");
+        S.sms.last = r;
+        toast(r.demo ? `체험 모드: 실제 문자는 나가지 않아요 (${r.sent}명 처리)` : `${r.sent}명에게 문자를 보냈어요${r.failed.length ? ` · 실패 ${r.failed.length}명` : ""}`);
+      });
+    },
     "paid-set": (t) => run(async () => { await api.admin.paidSet(S.pin, t.dataset.id, t.dataset.v); toast(t.dataset.v === "approved" ? "승인했어요. 참가자 화면에 바로 열려요." : t.dataset.v === "rejected" ? "거절했어요." : "대기로 되돌렸어요."); }),
     "csv-match": () => {
       const rows = [["남 번호", "남 이름", "여 번호", "여 이름"]];
@@ -649,6 +681,7 @@
   document.addEventListener("input", (e) => {
     if (e.target.id === "imp-text") S.imp.text = e.target.value;
     if (e.target.id === "imp-newdate") S.imp.newdate = e.target.value;
+    if (e.target.id === "sms-test") S.sms.test = e.target.value.replace(/\D/g, "").slice(0, 11);
     if (e.target.id === "ap-newdate") S.appl.newdate = e.target.value;
     if (e.target.id === "ap-newtime") S.appl.newtime = e.target.value;
     if (e.target.id === "imp-newtime") S.imp.newtime = e.target.value;

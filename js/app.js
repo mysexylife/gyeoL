@@ -229,7 +229,11 @@
           <div class="who"><b>${r.number}번</b><span>${esc(r.name)}</span><span class="badge">연결 안 됨</span></div>
           <p class="gentle">이번에는 서로의 선택이 맞지 않았어요. 만나 주셔서 고마워요.</p></article>`).join("")}
       ${hits === 0 && res.length ? `<p class="note">연결되지 않아도 괜찮아요. 오늘 만난 시간은 그대로 남아요.</p>` : ""}
-      ${receivedView()}${paidView()}`;
+      ${receivedView()}${paidView()}
+      <section class="panel follow"><h2>다음 회차 소식</h2>
+        <p class="sub">인스타그램 <b>@gyeol.meet_official</b> 을 팔로우하면 다음 회차 소식과 콘텐츠를 확인하실 수 있어요.</p>
+        <p class="sub">주변 솔로분들께도 소개해 주세요 :)</p>
+        <a class="btn" href="https://www.instagram.com/gyeol.meet_official/" target="_blank" rel="noopener noreferrer">인스타그램 보러 가기</a></section>`;
   }
 
 

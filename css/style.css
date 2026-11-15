@@ -629,3 +629,8 @@ button.brand { background: none; border: 0; padding: 4px 0; cursor: pointer; -we
 .phead.chk > span:first-child { text-align: center; }
 .prow.here { background: color-mix(in srgb, var(--ok-soft) 55%, var(--surface)); }
 .prow.here .pnm::after { content: " ✓"; color: var(--ok); font-weight: 700; }
+
+/* 결과 안내 문자 · 인스타 안내 */
+.smsprev summary { cursor: pointer; font-size: 13px; color: var(--muted); }
+.smsprev pre { white-space: pre-wrap; word-break: break-word; margin: 8px 0 0; padding: 10px 12px; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; font: 13px/1.6 var(--sans); }
+.panel.follow .btn { text-align: center; text-decoration: none; display: block; }

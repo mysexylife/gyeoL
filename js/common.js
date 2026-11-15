@@ -36,6 +36,11 @@
     invalid_pin: "비밀번호는 숫자 4자리예요.",
     pin_exists: "이미 비밀번호가 정해진 번호예요. 비밀번호를 입력해 주세요.",
     pin_not_set: "먼저 비밀번호를 정해 주세요.",
+    results_not_open: "먼저 매칭 결과를 공개해 주세요. 공개한 뒤에 문자를 보낼 수 있어요.",
+    not_configured: "문자 서비스 설정이 아직 안 되어 있어요. (서버에 발송 키·발신번호가 없어요)",
+    bad_number: "문자를 받을 번호를 정확히 입력해 주세요.",
+    sms_not_installed: "문자 발송 기능이 아직 서버에 설치되지 않았어요.",
+    server_error: "문자 발송 중 서버 오류가 났어요.",
     depositor_required: "입금자명을 적어 주세요.",
     already_requested: "이미 신청했어요. 진행자 확인을 기다려 주세요.",
     invalid_slot: "메모 칸 번호가 올바르지 않아요.",
@@ -187,6 +192,18 @@
         setNumber: (pin, id, n) => rpc("admin_set_number", { p_pin: pin, p_id: id, p_number: n }),
         setPicks: (pin, participantId, targetIds) => rpc("admin_set_picks", { p_pin: pin, p_participant: participantId, p_targets: targetIds }),
         remove: (pin, id) => rpc("admin_remove", { p_pin: pin, p_id: id }),
+        // 결과 안내 문자: Supabase Edge Function(send-result-sms)을 부른다. testTo 가 있으면 그 번호로만 시험 발송한다.
+        async sendSms(pin, round, testTo) {
+          const url = String(cfg.supabaseUrl).replace(/\/+$/, "") + "/functions/v1/send-result-sms";
+          let res;
+          try {
+            res = await fetch(url, { method: "POST", headers: { apikey: cfg.supabaseAnonKey, Authorization: "Bearer " + cfg.supabaseAnonKey, "Content-Type": "application/json" }, body: JSON.stringify({ pin: digits(pin), round, test_to: testTo || undefined }) });
+          } catch (e) { throw new Error("Failed to fetch"); }
+          if (res.status === 404) throw new Error("sms_not_installed");
+          let data = null; try { data = await res.json(); } catch (e) { /* 아래에서 처리 */ }
+          if (!res.ok || !data || data.error) throw new Error((data && data.error) || "server_error");
+          return data;
+        },
         resetPin: (pin, phone) => rpc("admin_reset_pin", { p_pin: pin, p_phone: phone }),
         setArrived: (pin, id, arrived) => rpc("admin_set_arrived", { p_pin: pin, p_id: id, p_arrived: !!arrived }),
         reset: (pin, round) => rpc("admin_reset", { p_pin: pin, p_round: round }),
@@ -431,6 +448,7 @@
           return {
             round: r ? { id: round, label: r.label, results_open: !!r.results_open, threads_open: !!r.threads_open } : null,
             results_open: r ? !!r.results_open : false,
+            sms_sent: ((s.smsLog || {})[round] || []).length,
             participants: here.map((p) => ({ id: p.id, number: p.number, gender: p.gender, name: p.name, phone: p.phone, age_label: p.age_label, school: p.school, mbti: p.mbti, hobby: p.hobby, submitted: !!s.surveys[p.id], arrived: !!p.arrived, has_pin: !!(s.pins || {})[p.phone] }))
               .sort((a, b) => (a.gender === b.gender ? a.number - b.number : a.gender === "M" ? -1 : 1)),
             matches, picks,
@@ -452,6 +470,16 @@
           if (targets.length > MAX_PICKS) fail("too_many");
           if (new Set(targets).size !== targets.length || targets.some((id) => { const t = s.people.find((x) => x.id === id); return !t || t.round !== me2.round || t.gender === me2.gender; })) fail("invalid_target");
           s.picks[pid] = targets.map((id) => ({ target: id, input: "" }));
+        }),
+        sendSms: (pin, round, testTo) => op((s) => {
+          checkAdmin(pin);
+          if (testTo) { if (!/^01\d{8,9}$/.test(String(testTo).replace(/\D/g, ""))) fail("bad_number"); return { test: true, sent: 1, failed: [] }; }
+          if (!(s.rounds[round] && s.rounds[round].results_open)) fail("results_not_open");
+          s.smsLog = s.smsLog || {};
+          const done = s.smsLog[round] = s.smsLog[round] || [];
+          const todo = s.people.filter((p) => p.round === round && !done.includes(p.id));
+          todo.forEach((p) => done.push(p.id));
+          return { total: s.people.filter((p) => p.round === round).length, already: done.length - todo.length, sent: todo.length, failed: [], demo: true };
         }),
         resetPin: (pin, phone) => op((s) => { checkAdmin(pin); if (s.pins) delete s.pins[normPhone(phone)]; }),
         setArrived: (pin, id, arrived) => op((s) => { checkAdmin(pin); const p = s.people.find((x) => x.id === id); if (p) p.arrived = !!arrived; }),
