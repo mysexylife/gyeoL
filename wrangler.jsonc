@@ -1,0 +1,6 @@
+{
+  // Cloudflare(Workers 정적 파일 배포) 설정: 빌드 없이 이 폴더를 그대로 공개한다.
+  "name": "gyeol",
+  "compatibility_date": "2025-09-01",
+  "assets": { "directory": "./" }
+}
