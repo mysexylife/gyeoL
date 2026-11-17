@@ -204,6 +204,8 @@
           if (!res.ok || !data || data.error) throw new Error((data && data.error) || "server_error");
           return data;
         },
+        smsPending: (pin, round) => rpc("admin_sms_pending", { p_pin: pin, p_round: round }),
+        smsMark: (pin, round) => rpc("admin_sms_mark", { p_pin: pin, p_round: round }),
         resetPin: (pin, phone) => rpc("admin_reset_pin", { p_pin: pin, p_phone: phone }),
         setArrived: (pin, id, arrived) => rpc("admin_set_arrived", { p_pin: pin, p_id: id, p_arrived: !!arrived }),
         reset: (pin, round) => rpc("admin_reset", { p_pin: pin, p_round: round }),
@@ -480,6 +482,20 @@
           const todo = s.people.filter((p) => p.round === round && !done.includes(p.id));
           todo.forEach((p) => done.push(p.id));
           return { total: s.people.filter((p) => p.round === round).length, already: done.length - todo.length, sent: todo.length, failed: [], demo: true };
+        }),
+        smsPending: (pin, round) => op((s) => {
+          checkAdmin(pin);
+          if (!(s.rounds[round] && s.rounds[round].results_open)) fail("results_not_open");
+          const done = ((s.smsLog || {})[round]) || [];
+          return s.people.filter((p) => p.round === round && !done.includes(p.id)).map((p) => ({ id: p.id, name: p.name, phone: p.phone }));
+        }),
+        smsMark: (pin, round) => op((s) => {
+          checkAdmin(pin);
+          s.smsLog = s.smsLog || {};
+          const done = s.smsLog[round] = s.smsLog[round] || [];
+          const todo = s.people.filter((p) => p.round === round && !done.includes(p.id));
+          todo.forEach((p) => done.push(p.id));
+          return todo.length;
         }),
         resetPin: (pin, phone) => op((s) => { checkAdmin(pin); if (s.pins) delete s.pins[normPhone(phone)]; }),
         setArrived: (pin, id, arrived) => op((s) => { checkAdmin(pin); const p = s.people.find((x) => x.id === id); if (p) p.arrived = !!arrived; }),

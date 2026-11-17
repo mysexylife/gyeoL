@@ -76,6 +76,13 @@
 
   /* ───────── CSV ───────── */
   function csvCell(v) { v = String(v ?? ""); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
+  // 스크립트처럼 글자만 있는 파일 내려받기(브라우저가 .txt 를 덧붙이지 않도록 일반 바이너리 형식으로 보낸다)
+  function downloadText(name, text) {
+    const blob = new Blob([text], { type: "application/octet-stream" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 800);
+  }
   function downloadCSV(name, rows) {
     const blob = new Blob(["﻿" + rows.map((r) => r.map(csvCell).join(",")).join("\r\n")], { type: "text/csv;charset=utf-8" });
     const a = document.createElement("a");
@@ -313,9 +320,16 @@
       <p class="sub" style="font-size:13px">결과를 <b>공개한 뒤</b>, 그 회차 참가자에게 "최종 선택 결과가 나왔어요 + 로그인 링크" 문자를 보내요. 매칭 결과와 연락처는 문자에 담기지 않아요. 이미 받은 사람에게는 다시 보내지 않아요.</p>
       <p class="sum"><b>${sent}명</b> 발송 완료 <span class="sub">/ 참가자 ${ppl.length}명${rest ? ` · 남은 ${rest}명` : ""}</span></p>
       <details class="smsprev"><summary>보내는 문자 미리 보기</summary><pre>${esc(smsText())}</pre></details>
+      <h3 class="sub-h">맥북으로 보내기 <span class="sub">아이폰 '문자 메시지 전달' 사용</span></h3>
+      <ol class="how"><li>아래에서 <b>테스트 스크립트</b>로 내 번호에 먼저 1건 보내 봅니다.</li><li>잘 오면 <b>발송 스크립트</b>를 받아 맥북의 <b>스크립트 편집기</b>로 열고 ▶ 실행합니다(한 명씩 간격을 두고 나가요).</li><li>끝나면 <b>발송 완료로 표시</b>를 눌러 중복 발송을 막아요.</li></ol>
       <div class="filters"><label class="mp" for="sms-test"><span>테스트 문자 받을 번호</span><input id="sms-test" type="tel" inputmode="numeric" placeholder="내 휴대폰 번호" value="${esc(S.sms.test)}"></label>
-        <button class="btn sm ghost" data-act="sms-test" ${S.busy ? "disabled" : ""}>테스트 1건 보내기</button></div>
-      <button class="btn" data-act="sms-send" ${!open || S.busy || !rest ? "disabled" : ""}>${!open ? "먼저 결과를 공개해 주세요" : !rest ? "모두 발송했어요" : S.confirm === "sms" ? `한 번 더 눌러 ${rest}명에게 발송` : `결과 안내 문자 보내기 (${rest}명)`}</button>
+        <button class="btn sm ghost" data-act="mac-test" ${S.busy ? "disabled" : ""}>테스트 스크립트 받기</button></div>
+      <button class="btn" data-act="mac-send" ${!open || S.busy || !rest ? "disabled" : ""}>${!open ? "먼저 결과를 공개해 주세요" : !rest ? "모두 발송했어요" : `발송 스크립트 받기 (${rest}명)`}</button>
+      <button class="btn ghost" data-act="mac-mark" ${!open || S.busy || !rest ? "disabled" : ""}>${S.confirm === "mark" ? "한 번 더 눌러 표시" : "발송 완료로 표시"}</button>
+      <p class="note">스크립트 파일에는 참가자 번호가 들어 있어요. 보낸 뒤에는 <b>파일을 삭제</b>하세요. 짧은 시간에 한꺼번에 보내면 통신사가 막을 수 있어서 한 명당 5초 간격으로 보내요.</p>
+      <details class="smsprev"><summary>솔라피로 자동 발송 (서비스 가입 시)</summary>
+        <div style="display:grid;gap:8px;margin-top:8px"><button class="btn sm ghost" data-act="sms-test" ${S.busy ? "disabled" : ""}>솔라피로 테스트 1건</button>
+          <button class="btn sm" data-act="sms-send" ${!open || S.busy || !rest ? "disabled" : ""}>${S.confirm === "sms" ? `한 번 더 눌러 ${rest}명에게 발송` : `솔라피로 결과 안내 문자 보내기 (${rest}명)`}</button></div></details>
       ${last ? `<p class="note">${last.test ? "테스트 문자를 보냈어요." : `이번에 ${last.sent}명에게 보냈어요${last.failed.length ? `, <b>실패 ${last.failed.length}명</b>` : ""}.`}</p>${last.failed.length ? `<ul class="texts">${last.failed.slice(0, 10).map((f) => `<li>${esc(maskPhone(f.to))} · ${esc(f.error)}</li>`).join("")}</ul>` : ""}` : ""}</section>`;
   }
 
@@ -610,6 +624,22 @@
       const key = "td" + t.dataset.id;
       if (S.confirm !== key) return askConfirm(key);
       run(async () => { await api.admin.threadDelete(S.pin, t.dataset.id); toast("실을 삭제했어요. 보낸 사람은 다시 보낼 수 있어요."); });
+    },
+    "mac-test": () => {
+      const to = digits(S.sms.test);
+      if (!/^01\d{8,9}$/.test(to)) return toast("테스트 문자를 받을 휴대폰 번호를 정확히 입력해 주세요.");
+      downloadText("gyeol-sms-test.applescript", window.MacSms.build(smsText(), [to], 5));
+      toast("테스트 스크립트를 받았어요. 맥북의 스크립트 편집기로 열어 실행해 주세요.");
+    },
+    "mac-send": () => run(async () => {
+      const list = await api.admin.smsPending(S.pin, S.round);
+      if (!list.length) return toast("보낼 사람이 없어요.");
+      downloadText("gyeol-sms-" + String(S.round).replace(/\D/g, "") + ".applescript", window.MacSms.build(smsText(), list.map((x) => x.phone), 5));
+      toast(list.length + "명 발송 스크립트를 받았어요. 맥북으로 옮겨 실행해 주세요.");
+    }),
+    "mac-mark": () => {
+      if (S.confirm !== "mark") return askConfirm("mark");
+      run(async () => { const n = await api.admin.smsMark(S.pin, S.round); toast(n + "명을 발송 완료로 표시했어요."); });
     },
     "sms-test": () => {
       const to = digits(S.sms.test);

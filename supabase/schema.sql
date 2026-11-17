@@ -967,3 +967,31 @@ begin
   perform public._check_admin(p_pin);
   delete from public.accounts where phone = public._norm_phone(p_phone);
 end $$;
+
+-- ───────────────────────── 결과 안내 문자: 맥북 메시지 앱으로 직접 보내는 방식 ─────────────────────────
+-- 아직 문자를 받지 않은 참가자(이름·연락처). 결과가 공개된 회차에서만 조회된다.
+create or replace function public.admin_sms_pending(p_pin text, p_round text)
+returns jsonb language plpgsql security definer set search_path = public as $$
+begin
+  perform public._check_admin(p_pin);
+  if not coalesce((select results_open from public.rounds where id = p_round), false) then raise exception 'results_not_open'; end if;
+  return coalesce((
+    select jsonb_agg(jsonb_build_object('id', p.id, 'name', p.name, 'phone', p.phone) order by p.gender desc, p.number)
+    from public.participants p
+    where p.round_id = p_round and p.phone ~ '^01\d{8,9}$'
+      and not exists (select 1 from public.sms_log l where l.participant_id = p.id and l.kind = 'result' and l.status = 'sent')), '[]'::jsonb);
+end $$;
+
+-- 진행자가 맥북에서 발송을 마친 뒤 누른다: 아직 기록이 없는 참가자 전원을 '발송 완료'로 표시해 다시 보내지 않게 한다.
+create or replace function public.admin_sms_mark(p_pin text, p_round text)
+returns int language plpgsql security definer set search_path = public as $$
+declare n int;
+begin
+  perform public._check_admin(p_pin);
+  insert into public.sms_log (round_id, participant_id, phone, kind, status)
+  select p.round_id, p.id, p.phone, 'result', 'sent' from public.participants p
+  where p.round_id = p_round
+    and not exists (select 1 from public.sms_log l where l.participant_id = p.id and l.kind = 'result' and l.status = 'sent');
+  get diagnostics n = row_count;
+  return n;
+end $$;
