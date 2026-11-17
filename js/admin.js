@@ -6,7 +6,7 @@
   const $app = document.getElementById("app");
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
-  const S = { pin: "", data: null, paid: [], thr: [], applicants: [], appl: { date: "", gender: "", showAssigned: false, sel: {}, target: "", newdate: "", newtime: "" }, error: "", confirm: "", busy: false, round: "", rounds: [], tab: "picks", open: {}, openPick: {}, pickEdit: {}, onlyBad: false, onlyAbsent: false, sms: { test: "", last: null, kind: "reserve", venue: "", when: "", counts: null },
+  const S = { pin: "", data: null, paid: [], thr: [], applicants: [], appl: { date: "", gender: "", showAssigned: false, sel: {}, target: "", newdate: "", newtime: "" }, error: "", confirm: "", busy: false, round: "", rounds: [], tab: "picks", open: {}, openPick: {}, pickEdit: {}, onlyBad: false, onlyAbsent: false, sms: { test: "", last: null, kind: "reserve", venue: "", map: "", when: "", counts: null },
     add: { open: false, editing: false, round: "", newdate: "", newtime: "", name: "", gender: "", phone: "", number: "", age: "", school: "", mbti: "", hobby: "" },
     imp: { dest: "applicants", text: "", fileName: "", table: null, map: {}, date: "", round: "", newdate: "", newtime: "", numberedOnly: false, onlyDate: true, prune: false, done: null, error: "" } };
   try { S.pin = sessionStorage.getItem("rn_admin_pin") || ""; S.round = sessionStorage.getItem("rn_admin_round") || ""; S.tab = sessionStorage.getItem("rn_admin_tab") || "picks"; } catch (e) { /* 저장소 사용 불가 */ }
@@ -313,7 +313,7 @@
   const SMS_KINDS = [["reserve", "예약 확인"], ["confirm", "전날 확정"], ["result", "결과 안내"]];
   const SMS_DEFAULT = {
     reserve: ["안녕하세요, 로테이션 소개팅 [결] 운영진입니다 :)", "신청과 입금이 확인되어 예약이 잘 접수되었어요!", "", "신청하신 날짜: {희망날짜}", "", "일시와 장소는 행사 전날 문자로 다시 확정해서 안내드릴게요."].join("\n"),
-    confirm: ["안녕하세요, 로테이션 소개팅 [결] 운영진입니다 :)", "내일 로테이션 소개팅이 확정되어 안내드려요!", "", "일시: {일시}", "장소: {장소}", "", "내일 만나요 :)"].join("\n"),
+    confirm: ["안녕하세요, 로테이션 소개팅 [결]입니다 🧶", "행사 장소와 시간 안내드립니다!", "", "📅 일시 : {일시}", "📍 장소 : {장소}", "🗺️ 지도 : {지도}", "", "⏰ 원활한 진행을 위해 {도착시간}까지 꼭 도착해주세요!", "늦게 오시면 로테이션 순서에 함께하기 어려울 수 있어요.", "", "🎓 입장할 때 학생증을 확인해요. 실물이나 모바일 학생증 등 학교를 확인할 수 있는 물품을 꼭 챙겨주세요!", "☕ 간단한 다과가 준비되어 있어요.", "", "혹시 늦거나 못 오시게 되면 전날까지 미리 연락 부탁드려요.", "내일 뵐게요 💘"].join("\n"),
     result: ["안녕하세요, 로테이션 소개팅 [결] 운영진입니다 :)", "오늘 참여해 주셔서 감사합니다!", "", "최종 선택 결과가 나왔어요.", "아래 링크에서 로그인 후 최종선택 탭에서 확인해 주세요.", "{링크}", "", "인스타그램을 팔로우하면 다음 회차 소식과 콘텐츠를 확인하실 수 있어요ㅎㅎ", "→ @gyeol.meet_official"].join("\n"),
   };
   const SMS_WHO = { reserve: "신청자(구글폼으로 들어온 사람) 중 아직 받지 않은 사람", confirm: "이 날짜(회차)에 배정된 참가자 중 아직 받지 않은 사람", result: "이 날짜(회차) 참가자 중 아직 받지 않은 사람 (결과를 공개한 뒤에만)" };
@@ -341,10 +341,20 @@
     const m = String(roundId || "").match(/^(\d{4})-(\d{2})-(\d{2})(?: (\d{2}:\d{2}))?/);
     return m ? parseInt(m[2], 10) + "월 " + parseInt(m[3], 10) + "일(" + WDAY[new Date(+m[1], +m[2] - 1, +m[3]).getDay()] + ")" + (m[4] ? " " + m[4] : "") : "";
   }
+  // '11월 14일(토) 18:00 - 20:00' 의 첫 시각에서 10분을 뺀 도착 시각(17:50). 시각이 없으면 빈 값
+  function arriveTime(text) {
+    const m = String(text || "").match(/(\d{1,2}):(\d{2})/);
+    if (!m) return "";
+    const min = parseInt(m[1], 10) * 60 + parseInt(m[2], 10) - 10;
+    return min < 0 ? "" : String(Math.floor(min / 60)).padStart(2, "0") + ":" + String(min % 60).padStart(2, "0");
+  }
   function smsVars(kind, person) {
     const v = { 이름: person ? person.name : "홍길동", 링크: entryUrl() };
     if (kind === "reserve") v.희망날짜 = person ? fmtMD(person.pref_date) : fmtMD(todayISO());
-    if (kind === "confirm") { v.일시 = S.sms.when.trim() || fmtWhen(S.round); v.장소 = S.sms.venue.trim(); }
+    if (kind === "confirm") {
+      v.일시 = S.sms.when.trim() || fmtWhen(S.round); v.장소 = S.sms.venue.trim(); v.지도 = S.sms.map.trim();
+      v.도착시간 = arriveTime(v.일시);   // 시작 시간 10분 전. 일시에 시간이 없으면 비어서 그 줄이 빠진다
+    }
     return v;
   }
   const smsRest = (kind, d) => {
@@ -378,9 +388,11 @@
       <div class="seg smsseg" role="group" aria-label="문자 종류">${seg}</div>
       <p class="sub" style="font-size:13px">받는 사람: <b>${SMS_WHO[kind]}</b>. 이미 받은 사람에게는 다시 보내지 않아요.</p>
       <p class="sum"><b>${st.sent}명</b> 발송 완료 <span class="sub">/ 대상 ${st.total}명${st.rest ? ` · 남은 ${st.rest}명` : ""}</span></p>
-      ${kind === "confirm" ? `<div class="filters"><label class="mp" for="sms-when"><span>일시 <small>비우면 회차 날짜로 채워요</small></span><input id="sms-when" type="text" placeholder="${esc(fmtWhen(S.round) || "예: 11월 8일(일) 19:00")}" value="${esc(S.sms.when)}"></label>
-        <label class="mp" for="sms-venue"><span>장소 *</span><input id="sms-venue" type="text" placeholder="예: 홍대 ○○ 공간" value="${esc(S.sms.venue)}"></label></div>` : ""}
-      <label class="mp" for="sms-tpl"><span>문안 <small>{이름} {희망날짜} {일시} {장소} {링크} 를 쓸 수 있어요. 값이 없는 자리표시가 든 줄은 빠져요.</small></span><textarea id="sms-tpl" rows="9">${esc(tpl)}</textarea></label>
+      ${kind === "confirm" ? `<div class="filters"><label class="mp" for="sms-when"><span>일시 <small>비우면 회차 날짜로 채워요</small></span><input id="sms-when" type="text" placeholder="${esc((fmtWhen(S.round) || "11월 8일(일)") + " 18:00 - 20:00 처럼 적어도 돼요")}" value="${esc(S.sms.when)}"></label>
+        <label class="mp" for="sms-venue"><span>장소 *</span><input id="sms-venue" type="text" placeholder="예: 홍대 ○○ 공간" value="${esc(S.sms.venue)}"></label>
+        <label class="mp" for="sms-map"><span>지도 링크 <small>비우면 그 줄이 빠져요</small></span><input id="sms-map" type="url" placeholder="https://naver.me/…" value="${esc(S.sms.map)}"></label></div>
+        <p class="sub" style="font-size:12.5px">일시에 <b>18:00 - 20:00</b>처럼 시간을 적으면 <b>도착 시간(시작 10분 전)</b>이 자동으로 계산돼요.</p>` : ""}
+      <label class="mp" for="sms-tpl"><span>문안 <small>{이름} {희망날짜} {일시} {장소} {지도} {도착시간} {링크} 를 쓸 수 있어요. 값이 없는 자리표시가 든 줄은 빠져요.</small></span><textarea id="sms-tpl" rows="9">${esc(tpl)}</textarea></label>
       <details class="smsprev"><summary>미리 보기 (예시 값)</summary><pre>${esc(preview)}</pre></details>
       <button class="link" data-act="sms-tpl-reset" style="justify-self:start">이 문안을 기본 문구로 되돌리기</button>
       <h3 class="sub-h">보내는 순서</h3>
@@ -787,6 +799,7 @@
     if (e.target.id === "sms-test") S.sms.test = e.target.value.replace(/\D/g, "").slice(0, 11);
     if (e.target.id === "sms-venue") { S.sms.venue = e.target.value; updateSmsButtons(); }
     if (e.target.id === "sms-when") S.sms.when = e.target.value;
+    if (e.target.id === "sms-map") S.sms.map = e.target.value;
     if (e.target.id === "sms-tpl") smsSaveTpl(S.sms.kind, e.target.value);
     if (e.target.id === "ap-newdate") S.appl.newdate = e.target.value;
     if (e.target.id === "ap-newtime") S.appl.newtime = e.target.value;
