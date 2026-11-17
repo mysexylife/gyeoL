@@ -22,25 +22,33 @@
     return /^01\d{8,9}$/.test(d) ? "+82" + d.slice(1) : "";
   }
 
-  // text: 보낼 문안, phones: 01012345678 형식 번호 목록, delaySec: 한 명 보내고 쉬는 초(통신사 제한을 피하려고 간격을 둔다)
-  function build(text, phones, delaySec) {
-    const list = Array.from(new Set((phones || []).map(e164).filter(Boolean)));
+  // items: [{ phone: "01012345678", text: "그 사람에게 보낼 문안" }, ...]  (사람마다 문안이 달라도 된다)
+  // delaySec: 한 명 보내고 쉬는 초(통신사 제한을 피하려고 간격을 둔다)
+  function buildItems(items, delaySec) {
+    const seen = new Set();
+    const list = [];
+    (items || []).forEach((it) => {
+      const ph = e164(it && it.phone);
+      if (!ph || seen.has(ph)) return;
+      seen.add(ph); list.push({ ph, text: String((it && it.text) || "") });
+    });
     const delay = Math.max(2, Math.min(30, Number(delaySec) || 5));
     const q = (s) => '"' + s + '"';
     const lines = [
-      "-- gyeoL result SMS sender (Messages app on Mac, via iPhone Text Message Forwarding)",
+      "-- gyeoL SMS sender (Messages app on Mac, via iPhone Text Message Forwarding)",
       "-- How to use: open this file in Script Editor, then press the Run button.",
       "-- This file contains phone numbers. Delete it after use.",
       "",
-      "set msgText to " + asText(text),
-      "set phones to {" + list.map(q).join(", ") + "}",
+      "set phones to {" + list.map((x) => q(x.ph)).join(", ") + "}",
+      "set texts to {" + list.map((x) => asText(x.text)).join(",\n\t") + "}",
       "set delaySec to " + delay,
       "set okCount to 0",
       "set failList to {}",
       "",
       'tell application "Messages"',
-      "\trepeat with p in phones",
-      "\t\tset phoneText to contents of p",
+      "\trepeat with i from 1 to (count of phones)",
+      "\t\tset phoneText to item i of phones",
+      "\t\tset msgText to item i of texts",
       "\t\tset sentOk to false",
       "\t\ttry",
       "\t\t\tset svc to 1st account whose service type = SMS",
@@ -74,7 +82,12 @@
     return lines.join("\n");
   }
 
-  const api = { build, asText, e164 };
+  // 같은 문안을 여러 번호에 보낼 때(예전 방식과 호환)
+  function build(text, phones, delaySec) {
+    return buildItems((phones || []).map((phone) => ({ phone, text })), delaySec);
+  }
+
+  const api = { build, buildItems, asText, e164 };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.MacSms = api;
 })(typeof window !== "undefined" ? window : globalThis);

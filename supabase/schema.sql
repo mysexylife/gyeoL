@@ -159,13 +159,16 @@ create table if not exists public.sms_log (
   id             uuid primary key default gen_random_uuid(),
   round_id       text not null,
   participant_id uuid references public.participants(id) on delete set null,
+  applicant_id   uuid references public.applicants(id) on delete set null,   -- 예약 확인 문자는 신청자에게 보낸다
   phone          text not null,
-  kind           text not null default 'result',
+  kind           text not null default 'result',   -- reserve(예약 확인) · confirm(전날 확정) · result(결과 안내)
   status         text not null check (status in ('sent','failed')),
   error          text,
   created_at     timestamptz not null default now()
 );
 create unique index if not exists sms_sent_once on public.sms_log (participant_id, kind) where status = 'sent';
+alter table public.sms_log add column if not exists applicant_id uuid references public.applicants(id) on delete set null;
+create unique index if not exists sms_sent_once_applicant on public.sms_log (applicant_id, kind) where status = 'sent' and applicant_id is not null;
 create index if not exists sms_log_round_idx on public.sms_log (round_id);
 alter table public.sms_log enable row level security;
 
@@ -785,6 +788,7 @@ create or replace function public.admin_applicant_remove(p_pin text, p_id uuid)
 returns void language plpgsql security definer set search_path = public as $$
 begin
   perform public._check_admin(p_pin);
+  delete from public.sms_log where applicant_id = p_id;
   delete from public.applicants where id = p_id;
 end $$;
 
@@ -969,29 +973,66 @@ begin
 end $$;
 
 -- ───────────────────────── 결과 안내 문자: 맥북 메시지 앱으로 직접 보내는 방식 ─────────────────────────
--- 아직 문자를 받지 않은 참가자(이름·연락처). 결과가 공개된 회차에서만 조회된다.
-create or replace function public.admin_sms_pending(p_pin text, p_round text)
+-- 문자 종류: reserve(예약 확인, 신청자 대상) · confirm(전날 확정, 회차 참가자) · result(결과 안내, 결과 공개된 회차 참가자)
+-- 아직 그 문자를 받지 않은 사람(이름·연락처 등)을 돌려준다.
+drop function if exists public.admin_sms_pending(text, text);
+drop function if exists public.admin_sms_mark(text, text);
+create or replace function public.admin_sms_pending(p_pin text, p_round text, p_kind text default 'result')
 returns jsonb language plpgsql security definer set search_path = public as $$
 begin
   perform public._check_admin(p_pin);
-  if not coalesce((select results_open from public.rounds where id = p_round), false) then raise exception 'results_not_open'; end if;
-  return coalesce((
-    select jsonb_agg(jsonb_build_object('id', p.id, 'name', p.name, 'phone', p.phone) order by p.gender desc, p.number)
-    from public.participants p
-    where p.round_id = p_round and p.phone ~ '^01\d{8,9}$'
-      and not exists (select 1 from public.sms_log l where l.participant_id = p.id and l.kind = 'result' and l.status = 'sent')), '[]'::jsonb);
+  if p_kind = 'reserve' then
+    return coalesce((
+      select jsonb_agg(jsonb_build_object('id', a.id, 'name', a.name, 'phone', a.phone, 'pref_date', a.pref_date) order by a.created_at)
+      from public.applicants a
+      where a.phone ~ '^01\d{8,9}$'
+        and not exists (select 1 from public.sms_log l where l.applicant_id = a.id and l.kind = 'reserve' and l.status = 'sent')), '[]'::jsonb);
+  elsif p_kind in ('confirm', 'result') then
+    if p_kind = 'result' and not coalesce((select results_open from public.rounds where id = p_round), false) then raise exception 'results_not_open'; end if;
+    return coalesce((
+      select jsonb_agg(jsonb_build_object('id', p.id, 'name', p.name, 'phone', p.phone, 'number', p.number) order by p.gender desc, p.number)
+      from public.participants p
+      where p.round_id = p_round and p.phone ~ '^01\d{8,9}$'
+        and not exists (select 1 from public.sms_log l where l.participant_id = p.id and l.kind = p_kind and l.status = 'sent')), '[]'::jsonb);
+  end if;
+  raise exception 'invalid_kind';
 end $$;
 
--- 진행자가 맥북에서 발송을 마친 뒤 누른다: 아직 기록이 없는 참가자 전원을 '발송 완료'로 표시해 다시 보내지 않게 한다.
-create or replace function public.admin_sms_mark(p_pin text, p_round text)
+-- 진행자가 맥북에서 발송을 마친 뒤 누른다: 아직 기록이 없는 사람 전원을 '발송 완료'로 표시해 다시 보내지 않게 한다.
+create or replace function public.admin_sms_mark(p_pin text, p_round text, p_kind text default 'result')
 returns int language plpgsql security definer set search_path = public as $$
 declare n int;
 begin
   perform public._check_admin(p_pin);
-  insert into public.sms_log (round_id, participant_id, phone, kind, status)
-  select p.round_id, p.id, p.phone, 'result', 'sent' from public.participants p
-  where p.round_id = p_round
-    and not exists (select 1 from public.sms_log l where l.participant_id = p.id and l.kind = 'result' and l.status = 'sent');
+  if p_kind = 'reserve' then
+    insert into public.sms_log (round_id, applicant_id, phone, kind, status)
+    select 'applicants', a.id, a.phone, 'reserve', 'sent' from public.applicants a
+    where not exists (select 1 from public.sms_log l where l.applicant_id = a.id and l.kind = 'reserve' and l.status = 'sent');
+  elsif p_kind in ('confirm', 'result') then
+    insert into public.sms_log (round_id, participant_id, phone, kind, status)
+    select p.round_id, p.id, p.phone, p_kind, 'sent' from public.participants p
+    where p.round_id = p_round
+      and not exists (select 1 from public.sms_log l where l.participant_id = p.id and l.kind = p_kind and l.status = 'sent');
+  else
+    raise exception 'invalid_kind';
+  end if;
   get diagnostics n = row_count;
   return n;
+end $$;
+
+-- 종류별 발송 현황(보낸 수 / 대상 수). 문자 패널의 숫자에 쓴다.
+create or replace function public.admin_sms_counts(p_pin text, p_round text)
+returns jsonb language plpgsql security definer set search_path = public as $$
+begin
+  perform public._check_admin(p_pin);
+  return jsonb_build_object(
+    'reserve', jsonb_build_object(
+      'sent', (select count(*) from public.sms_log where kind = 'reserve' and status = 'sent' and applicant_id is not null),
+      'total', (select count(*) from public.applicants)),
+    'confirm', jsonb_build_object(
+      'sent', (select count(*) from public.sms_log where round_id = p_round and kind = 'confirm' and status = 'sent'),
+      'total', (select count(*) from public.participants where round_id = p_round)),
+    'result', jsonb_build_object(
+      'sent', (select count(*) from public.sms_log where round_id = p_round and kind = 'result' and status = 'sent'),
+      'total', (select count(*) from public.participants where round_id = p_round)));
 end $$;

@@ -204,8 +204,9 @@
           if (!res.ok || !data || data.error) throw new Error((data && data.error) || "server_error");
           return data;
         },
-        smsPending: (pin, round) => rpc("admin_sms_pending", { p_pin: pin, p_round: round }),
-        smsMark: (pin, round) => rpc("admin_sms_mark", { p_pin: pin, p_round: round }),
+        smsPending: (pin, round, kind) => rpc("admin_sms_pending", { p_pin: pin, p_round: round || "", p_kind: kind || "result" }),
+        smsMark: (pin, round, kind) => rpc("admin_sms_mark", { p_pin: pin, p_round: round || "", p_kind: kind || "result" }),
+        smsCounts: (pin, round) => rpc("admin_sms_counts", { p_pin: pin, p_round: round || "" }),
         resetPin: (pin, phone) => rpc("admin_reset_pin", { p_pin: pin, p_phone: phone }),
         setArrived: (pin, id, arrived) => rpc("admin_set_arrived", { p_pin: pin, p_id: id, p_arrived: !!arrived }),
         reset: (pin, round) => rpc("admin_reset", { p_pin: pin, p_round: round }),
@@ -450,7 +451,7 @@
           return {
             round: r ? { id: round, label: r.label, results_open: !!r.results_open, threads_open: !!r.threads_open } : null,
             results_open: r ? !!r.results_open : false,
-            sms_sent: ((s.smsLog || {})[round] || []).length,
+            sms_sent: (((s.smsLog || {})["result:" + round]) || []).length,
             participants: here.map((p) => ({ id: p.id, number: p.number, gender: p.gender, name: p.name, phone: p.phone, age_label: p.age_label, school: p.school, mbti: p.mbti, hobby: p.hobby, submitted: !!s.surveys[p.id], arrived: !!p.arrived, has_pin: !!(s.pins || {})[p.phone] }))
               .sort((a, b) => (a.gender === b.gender ? a.number - b.number : a.gender === "M" ? -1 : 1)),
             matches, picks,
@@ -478,24 +479,47 @@
           if (testTo) { if (!/^01\d{8,9}$/.test(String(testTo).replace(/\D/g, ""))) fail("bad_number"); return { test: true, sent: 1, failed: [] }; }
           if (!(s.rounds[round] && s.rounds[round].results_open)) fail("results_not_open");
           s.smsLog = s.smsLog || {};
-          const done = s.smsLog[round] = s.smsLog[round] || [];
+          const done = s.smsLog["result:" + round] = s.smsLog["result:" + round] || [];
           const todo = s.people.filter((p) => p.round === round && !done.includes(p.id));
           todo.forEach((p) => done.push(p.id));
           return { total: s.people.filter((p) => p.round === round).length, already: done.length - todo.length, sent: todo.length, failed: [], demo: true };
         }),
-        smsPending: (pin, round) => op((s) => {
+        smsPending: (pin, round, kind) => op((s) => {
           checkAdmin(pin);
-          if (!(s.rounds[round] && s.rounds[round].results_open)) fail("results_not_open");
-          const done = ((s.smsLog || {})[round]) || [];
-          return s.people.filter((p) => p.round === round && !done.includes(p.id)).map((p) => ({ id: p.id, name: p.name, phone: p.phone }));
-        }),
-        smsMark: (pin, round) => op((s) => {
-          checkAdmin(pin);
+          kind = kind || "result";
           s.smsLog = s.smsLog || {};
-          const done = s.smsLog[round] = s.smsLog[round] || [];
+          if (kind === "reserve") {
+            const done = s.smsLog.reserve || [];
+            return (s.applicants || []).filter((a) => !done.includes(a.id)).map((a) => ({ id: a.id, name: a.name, phone: a.phone, pref_date: a.pref_date }));
+          }
+          if (kind === "result" && !(s.rounds[round] && s.rounds[round].results_open)) fail("results_not_open");
+          const done = s.smsLog[kind + ":" + round] || [];
+          return s.people.filter((p) => p.round === round && !done.includes(p.id)).map((p) => ({ id: p.id, name: p.name, phone: p.phone, number: p.number }));
+        }),
+        smsMark: (pin, round, kind) => op((s) => {
+          checkAdmin(pin);
+          kind = kind || "result";
+          s.smsLog = s.smsLog || {};
+          if (kind === "reserve") {
+            const done = s.smsLog.reserve = s.smsLog.reserve || [];
+            const todo = (s.applicants || []).filter((a) => !done.includes(a.id));
+            todo.forEach((a) => done.push(a.id));
+            return todo.length;
+          }
+          const key = kind + ":" + round, done = s.smsLog[key] = s.smsLog[key] || [];
           const todo = s.people.filter((p) => p.round === round && !done.includes(p.id));
           todo.forEach((p) => done.push(p.id));
           return todo.length;
+        }),
+        smsCounts: (pin, round) => op((s) => {
+          checkAdmin(pin);
+          s.smsLog = s.smsLog || {};
+          const n = (k) => (s.smsLog[k] || []).length, here = s.people.filter((p) => p.round === round).length;
+          return {
+            reserve: { sent: n("reserve"), total: (s.applicants || []).length },
+            confirm: { sent: n("confirm:" + round), total: here },
+            result: { sent: n("result:" + round), total: here },
+          };
         }),
         resetPin: (pin, phone) => op((s) => { checkAdmin(pin); if (s.pins) delete s.pins[normPhone(phone)]; }),
         setArrived: (pin, id, arrived) => op((s) => { checkAdmin(pin); const p = s.people.find((x) => x.id === id); if (p) p.arrived = !!arrived; }),
