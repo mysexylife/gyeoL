@@ -366,9 +366,9 @@
   // 발송 버튼의 상태(눌러도 되는지, 글자): 장소를 입력하는 중에도 바로 갱신할 수 있게 따로 계산한다
   function smsSendState(d) {
     const open = !!d.results_open, kind = S.sms.kind, st = smsRest(kind, d);
-    const needVenue = kind === "confirm" && !S.sms.venue.trim();
+    const needVenue = kind === "confirm" && (!S.sms.venue.trim() || !S.sms.map.trim());
     const canSend = !S.busy && st.rest > 0 && !(kind === "result" && !open) && !needVenue;
-    const label = kind === "result" && !open ? "먼저 결과를 공개해 주세요" : needVenue ? "장소를 입력해 주세요" : !st.rest ? "모두 발송했어요" : `발송 스크립트 받기 (${st.rest}명)`;
+    const label = kind === "result" && !open ? "먼저 결과를 공개해 주세요" : needVenue ? "장소와 지도 링크를 입력해 주세요" : !st.rest ? "모두 발송했어요" : `발송 스크립트 받기 (${st.rest}명)`;
     return { canSend, label, st, open };
   }
   function updateSmsButtons() {
@@ -381,7 +381,7 @@
   function smsPanel(d) {
     const last = S.sms.last, kind = S.sms.kind, tpl = smsTpl(kind);
     const { canSend, label, st, open } = smsSendState(d);
-    const needVenue = kind === "confirm" && !S.sms.venue.trim();
+    const needVenue = kind === "confirm" && (!S.sms.venue.trim() || !S.sms.map.trim());
     const preview = renderTpl(tpl, smsVars(kind, null));
     const seg = SMS_KINDS.map(([k, label]) => { const c = smsRest(k, d); return `<button type="button" data-act="sms-kind" data-v="${k}" class="${kind === k ? "on" : ""}">${label}${c.unknown ? "" : ` <small>${c.sent}/${c.total}</small>`}</button>`; }).join("");
     return `<section class="panel"><h2>안내 문자 <span class="sub">맥북 메시지 앱으로 보내요</span></h2>
@@ -390,7 +390,7 @@
       <p class="sum"><b>${st.sent}명</b> 발송 완료 <span class="sub">/ 대상 ${st.total}명${st.rest ? ` · 남은 ${st.rest}명` : ""}</span></p>
       ${kind === "confirm" ? `<div class="filters"><label class="mp" for="sms-when"><span>일시 <small>비우면 회차 날짜로 채워요</small></span><input id="sms-when" type="text" placeholder="${esc((fmtWhen(S.round) || "11월 8일(일)") + " 18:00 - 20:00 처럼 적어도 돼요")}" value="${esc(S.sms.when)}"></label>
         <label class="mp" for="sms-venue"><span>장소 *</span><input id="sms-venue" type="text" placeholder="예: 홍대 ○○ 공간" value="${esc(S.sms.venue)}"></label>
-        <label class="mp" for="sms-map"><span>지도 링크 <small>비우면 그 줄이 빠져요</small></span><input id="sms-map" type="url" placeholder="https://naver.me/…" value="${esc(S.sms.map)}"></label></div>
+        <label class="mp" for="sms-map"><span>지도 링크 *</span><input id="sms-map" type="url" placeholder="https://naver.me/…" value="${esc(S.sms.map)}"></label></div>
         <p class="sub" style="font-size:12.5px">일시에 <b>18:00 - 20:00</b>처럼 시간을 적으면 <b>도착 시간(시작 10분 전)</b>이 자동으로 계산돼요.</p>` : ""}
       <label class="mp" for="sms-tpl"><span>문안 <small>{이름} {희망날짜} {일시} {장소} {지도} {도착시간} {링크} 를 쓸 수 있어요. 값이 없는 자리표시가 든 줄은 빠져요.</small></span><textarea id="sms-tpl" rows="9">${esc(tpl)}</textarea></label>
       <details class="smsprev"><summary>미리 보기 (예시 값)</summary><pre>${esc(preview)}</pre></details>
@@ -705,13 +705,13 @@
     "mac-test": () => {
       const to = digits(S.sms.test), kind = S.sms.kind;
       if (!/^01\d{8,9}$/.test(to)) return toast("테스트 문자를 받을 휴대폰 번호를 정확히 입력해 주세요.");
-      if (kind === "confirm" && !S.sms.venue.trim()) return toast("장소를 먼저 입력해 주세요.");
+      if (kind === "confirm" && (!S.sms.venue.trim() || !S.sms.map.trim())) return toast("장소와 지도 링크를 먼저 입력해 주세요.");
       downloadText("gyeol-sms-test.applescript", window.MacSms.buildItems([{ phone: to, text: renderTpl(smsTpl(kind), smsVars(kind, null)) }], 5));
       toast("테스트 스크립트를 받았어요. 맥북의 스크립트 편집기로 열어 실행해 주세요.");
     },
     "mac-send": () => {
       const kind = S.sms.kind;
-      if (kind === "confirm" && !S.sms.venue.trim()) return toast("장소를 먼저 입력해 주세요.");
+      if (kind === "confirm" && (!S.sms.venue.trim() || !S.sms.map.trim())) return toast("장소와 지도 링크를 먼저 입력해 주세요.");
       run(async () => {
         const list = await api.admin.smsPending(S.pin, S.round, kind);
         if (!list.length) return toast("보낼 사람이 없어요.");
@@ -799,7 +799,7 @@
     if (e.target.id === "sms-test") S.sms.test = e.target.value.replace(/\D/g, "").slice(0, 11);
     if (e.target.id === "sms-venue") { S.sms.venue = e.target.value; updateSmsButtons(); }
     if (e.target.id === "sms-when") S.sms.when = e.target.value;
-    if (e.target.id === "sms-map") S.sms.map = e.target.value;
+    if (e.target.id === "sms-map") { S.sms.map = e.target.value; updateSmsButtons(); }
     if (e.target.id === "sms-tpl") smsSaveTpl(S.sms.kind, e.target.value);
     if (e.target.id === "ap-newdate") S.appl.newdate = e.target.value;
     if (e.target.id === "ap-newtime") S.appl.newtime = e.target.value;
