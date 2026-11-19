@@ -40,7 +40,9 @@
       "-- This file contains phone numbers. Delete it after use.",
       "",
       "set phones to {" + list.map((x) => q(x.ph)).join(", ") + "}",
-      "set texts to {" + list.map((x) => asText(x.text)).join(",\n\t") + "}",
+      // 문안 목록은 한 줄씩 'set end of' 로 쌓는다. 쉼표 뒤에서 줄을 바꾼 긴 목록 한 개로 쓰면 스크립트 편집기가 '표현식을 예상했지만 라인의 끝을 발견했습니다' 오류를 낸다.
+      "set texts to {}",
+      ...list.map((x) => "set end of texts to " + asText(x.text)),
       "set delaySec to " + delay,
       "set okCount to 0",
       "set failList to {}",
