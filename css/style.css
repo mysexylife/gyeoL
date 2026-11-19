@@ -659,3 +659,7 @@ button.brand { background: none; border: 0; padding: 4px 0; cursor: pointer; -we
 .undobar { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; justify-content: space-between; padding: 10px 12px; margin: 10px 0 0; border-radius: 12px; background: rgba(0,0,0,.05); font-size: 13.5px; }
 .undobar.ok { background: rgba(176, 108, 54, .12); margin: 0 0 12px; }
 .undobar small { opacity: .75; }
+/* 문자 시안: 항상 펼쳐서 보여주고, 저장 상태를 함께 표시 */
+.tplbox { display: grid; gap: 6px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: rgba(0,0,0,.025); }
+.tplhead { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; justify-content: space-between; }
+.tplbox textarea { width: 100%; box-sizing: border-box; }

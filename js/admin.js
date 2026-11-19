@@ -265,14 +265,17 @@
     const t = S.sms.tpl[kind];
     return typeof t === "string" && t.trim() ? t : SMS_DEFAULT[kind];
   }
-  function smsQueueSave() { clearTimeout(smsTimer); smsTimer = setTimeout(smsFlushSave, 700); }
+  function smsSetState(t) { S.sms.saveState = t; const el = document.getElementById("sms-savestate"); if (el) el.textContent = SMS_SAVE_TEXT[t] || ""; }
+  const SMS_SAVE_TEXT = { saving: "저장 중…", saved: "서버에 저장됨 · 다른 기기에서도 같게 보여요", error: "저장 실패 · 이 화면에서만 유지돼요" };
+  function smsQueueSave() { clearTimeout(smsTimer); smsSetState("saving"); smsTimer = setTimeout(smsFlushSave, 700); }
   async function smsFlushSave() {
     clearTimeout(smsTimer); smsTimer = null;
     const kind = S.sms.kind, round = S.round, tpl = S.sms.tpl[kind] || "";
     try {
       await api.admin.smsSaveTpl(S.pin, kind, tpl);
       if (round) await api.admin.smsSaveRound(S.pin, round, S.sms.when, S.sms.venue, S.sms.map, {});
-    } catch (e) { if (S.sms.dbOk) toast("문안을 서버에 저장하지 못했어요(SQL 최신본을 실행했는지 확인). 이 화면에서만 유지돼요."); S.sms.dbOk = false; }
+      S.sms.dbOk = true; smsSetState("saved");
+    } catch (e) { if (S.sms.dbOk) toast("문안을 서버에 저장하지 못했어요(SQL 최신본을 실행했는지 확인). 이 화면에서만 유지돼요."); S.sms.dbOk = false; smsSetState("error"); }
   }
   function smsSaveTpl(kind, text) { S.sms.tpl[kind] = text; smsQueueSave(); }
   // 서버의 문안·장소와 발송 대상 목록을 불러온다. 선택 상태(체크)는 15초 새로고침에도 유지한다.
@@ -412,13 +415,17 @@
       <div class="seg smsseg" role="group" aria-label="문자 종류">${seg}</div>
       <p class="sub" style="font-size:13px">${SMS_STEP[kind]}</p>
       <div class="filters">${roundSel}${when}${place}</div>
+      <section class="tplbox" aria-label="문자 문안">
+        <div class="tplhead"><b>${esc((SMS_KINDS.find((k) => k[0] === kind) || [])[1] || "")} 문자 시안</b><span class="sub" id="sms-savestate">${esc(SMS_SAVE_TEXT[S.sms.saveState] || (S.sms.dbOk ? "수정하면 서버에 저장돼요" : "서버에 저장하지 못했어요"))}</span></div>
+        <label class="mp" for="sms-tpl"><span class="sub" style="font-size:12.5px">{이름} {희망날짜} {일시} {장소} {지도} {도착시간} {링크} · 값이 없는 줄은 빠져요</span><textarea id="sms-tpl" rows="12">${esc(tpl)}</textarea></label>
+        <p class="sub" style="font-size:12.5px;margin:8px 0 4px">미리 보기 (예시 값)</p><pre id="sms-preview">${esc(renderTpl(tpl, smsVars(kind, null)))}</pre>
+        <button class="link" data-act="sms-tpl-reset" style="justify-self:start">기본 문구로 되돌리기</button>
+      </section>
+      <h3 class="sub-h" style="margin:4px 0 0">받는 사람</h3>
       ${smsFilterBar(kind)}
       <div id="sms-listbox">${smsRowsHtml()}</div>
       ${smsSentSel().length ? `<button class="link" data-act="mac-unmark" style="justify-self:start">${S.confirm === "unmark" ? "한 번 더 눌러 표시 해제" : `선택한 사람 중 발송됨 ${smsSentSel().length}명을 미발송으로 되돌리기`}</button>` : ""}
-      <details class="smsprev"><summary>문안 보기 · 수정</summary>
-        <label class="mp" for="sms-tpl"><span>문안 <small>{이름} {희망날짜} {일시} {장소} {지도} {도착시간} {링크} · 값이 없는 줄은 빠져요</small></span><textarea id="sms-tpl" rows="10">${esc(tpl)}</textarea></label>
-        <p class="sub" style="font-size:12.5px;margin:8px 0 4px">미리 보기 (예시)</p><pre id="sms-preview">${esc(renderTpl(tpl, smsVars(kind, null)))}</pre>
-        <button class="link" data-act="sms-tpl-reset" style="justify-self:start">기본 문구로 되돌리기</button></details>
+
       <button class="btn" data-act="mac-send" ${canSend ? "" : "disabled"}>${label}</button>
       <p class="note">받은 파일을 맥북의 <b>스크립트 편집기</b>로 열어 ▶ 실행하세요. 끝나면 아래 버튼으로 기록하고, 파일은 삭제하세요.</p>
       <button class="btn ghost" data-act="mac-mark" ${canSend ? "" : "disabled"}>${S.confirm === "mark" ? "한 번 더 눌러 표시" : "발송 완료로 표시"}</button>
@@ -770,7 +777,7 @@
       if (S.confirm !== key) return askConfirm(key);
       run(async () => { await api.admin.threadDelete(S.pin, t.dataset.id); toast("실을 삭제했어요. 보낸 사람은 다시 보낼 수 있어요."); });
     },
-    "sms-kind": (t) => { smsFlushSave(); S.sms.kind = t.dataset.v; S.sms.last = null; S.confirm = ""; S.sms.list = []; S.sms.f = { status: "unsent", q: "", date: "", time: "", src: "" }; render(); run(async () => {}); },
+    "sms-kind": (t) => { if (smsTimer !== null) smsFlushSave(); S.sms.kind = t.dataset.v; S.sms.last = null; S.confirm = ""; S.sms.list = []; S.sms.f = { status: "unsent", q: "", date: "", time: "", src: "" }; render(); run(async () => {}); },
     "sms-tpl-reset": () => { S.sms.tpl[S.sms.kind] = ""; smsFlushSave(); toast("기본 문구로 되돌렸어요."); render(); },
     "mac-test": () => {
       const to = digits(S.sms.test), kind = S.sms.kind;
