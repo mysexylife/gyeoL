@@ -417,6 +417,7 @@
       <div class="seg smsseg" role="group" aria-label="문자 종류">${seg}</div>
       <p class="sub" style="font-size:13px"><b>${SMS_STEP[kind]}</b> 보내요.${kind !== "reserve" && S.round ? ` 대상 회차 <b>${esc(roundLabel(S.round))}</b>.` : ""} 아래 목록은 기본으로 <b>미발송만</b> 보이고 모두 선택돼 있어요. 늦게 등록한 사람은 나중에 같은 화면에서 미발송만 골라 보내면 돼요.</p>
       <p class="sum"><b>${st.sent}명</b> 발송 완료 <span class="sub">/ 대상 ${st.total}명${st.rest ? ` · 남은 ${st.rest}명` : ""}</span></p>
+      ${kind !== "reserve" ? `<label class="mp" for="sms-round"><span>회차 <small>이 회차 참가자${kind === "cancel" ? "와 이 회차 신청자" : ""}가 대상이에요</small></span><select id="sms-round">${S.rounds.length ? S.rounds.map((r) => `<option value="${esc(r.id)}" ${r.id === S.round ? "selected" : ""}>${esc(roundLabel(r.id))} · 참가자 ${r.count}명 · ${r.results_open ? "결과 공개" : "진행 중"}</option>`).join("") : `<option value="">회차가 없어요</option>`}</select></label>` : ""}
       ${fields}
       <label class="mp" for="sms-tpl"><span>문안 <small>{이름} {희망날짜} {일시} {장소} {지도} {도착시간} {링크} {취소사유} {환불안내} 를 쓸 수 있어요. 값이 없는 자리표시가 든 줄은 빠져요.</small></span><textarea id="sms-tpl" rows="9">${esc(tpl)}</textarea></label>
       <details class="smsprev"><summary>미리 보기 (예시 값)</summary><pre id="sms-preview">${esc(preview)}</pre></details>
@@ -773,7 +774,7 @@
   });
   document.addEventListener("change", (e) => {
     const t = e.target;
-    if (t.id === "round-select") { S.round = t.value; S.confirm = ""; S.openPick = {}; S.open = {}; S.pickEdit = {}; run(async () => {}); return; }
+    if (t.id === "round-select" || t.id === "sms-round") { S.round = t.value; S.confirm = ""; S.openPick = {}; S.open = {}; S.pickEdit = {}; run(async () => {}); return; }
     if (t.id === "add-round") { S.add.round = t.value; render(); return; }
     if (t.id === "ap-date") { S.appl.date = t.value; S.appl.time = ""; render(); return; }
     if (t.id === "ap-time") { S.appl.time = t.value; render(); return; }
