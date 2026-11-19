@@ -122,7 +122,8 @@ function normAge(v) {
 }
 const normMbti = (v) => (/^[EI][NS][TF][JP]$/i.test(String(v || "").trim()) ? String(v).trim().toUpperCase() : "");
 
-// "11/8 (일) - 19:00-21:00" → "2026-11-08". 날짜를 하나만 골랐을 때만 쓴다. 5개월 넘게 지난 날짜면 내년으로 본다.
+// "11/8 (일) - 19:00-21:00" → "2026-11-08 19:00" (시작 시각까지). 날짜를 하나만 골랐을 때만 쓴다. 5개월 넘게 지난 날짜면 내년으로 본다.
+// 시각이 없으면 "2026-11-08" 만.
 function prefDate(v) {
   const t = String(v || "").match(/\d{1,2}\/\d{1,2}/g) || [];
   if (t.length !== 1) return "";
@@ -130,5 +131,6 @@ function prefDate(v) {
   const now = new Date();
   let y = now.getFullYear();
   if ((now - new Date(y, mo - 1, d)) / 86400000 > 150) y += 1;
-  return y + "-" + String(mo).padStart(2, "0") + "-" + String(d).padStart(2, "0");
+  const tm = String(v).match(/(\d{1,2}):(\d{2})/);
+  return y + "-" + String(mo).padStart(2, "0") + "-" + String(d).padStart(2, "0") + (tm ? " " + String(tm[1]).padStart(2, "0") + ":" + tm[2] : "");
 }

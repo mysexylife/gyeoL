@@ -6,7 +6,7 @@
   const $app = document.getElementById("app");
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
-  const S = { pin: "", data: null, paid: [], thr: [], applicants: [], appl: { date: "", gender: "", showAssigned: false, sel: {}, target: "", newdate: "", newtime: "" }, error: "", confirm: "", busy: false, round: "", rounds: [], tab: "picks", open: {}, openPick: {}, pickEdit: {}, onlyBad: false, onlyAbsent: false, sms: { test: "", last: null, kind: "reserve", venue: "", map: "", when: "", counts: null, tpl: {}, list: [], sel: {}, wasSent: {}, dbOk: true },
+  const S = { pin: "", data: null, paid: [], thr: [], applicants: [], appl: { date: "", time: "", gender: "", showAssigned: false, sel: {}, target: "", newdate: "", newtime: "" }, error: "", confirm: "", busy: false, round: "", rounds: [], tab: "picks", open: {}, openPick: {}, pickEdit: {}, onlyBad: false, onlyAbsent: false, sms: { test: "", last: null, kind: "reserve", venue: "", map: "", when: "", counts: null, tpl: {}, list: [], sel: {}, wasSent: {}, dbOk: true },
     add: { open: false, editing: false, round: "", newdate: "", newtime: "", name: "", gender: "", phone: "", number: "", age: "", school: "", mbti: "", hobby: "" },
     imp: { dest: "applicants", text: "", fileName: "", table: null, map: {}, date: "", round: "", newdate: "", newtime: "", numberedOnly: false, onlyDate: true, prune: false, done: null, error: "" } };
   try { S.pin = sessionStorage.getItem("rn_admin_pin") || ""; S.round = sessionStorage.getItem("rn_admin_round") || ""; S.tab = sessionStorage.getItem("rn_admin_tab") || "picks"; } catch (e) { /* 저장소 사용 불가 */ }
@@ -512,11 +512,16 @@
     const a = S.appl;
     return S.applicants.filter((x) => (a.showAssigned || !x.assigned_round)
       && (!a.gender || x.gender === a.gender)
-      && (!a.date || (a.date === "__none" ? !x.pref_date : x.pref_date === a.date)));
+      && (!a.date || (a.date === "__none" ? !x.pref_date : roundDate(x.pref_date) === a.date))
+      && (!a.time || a.date === "__none" || !a.date || (a.time === "__none" ? !String(x.pref_date || "").slice(11) : String(x.pref_date || "").slice(11) === a.time)));
   }
   function tabApplicants() {
     const a = S.appl, all = S.applicants, wait = all.filter((x) => !x.assigned_round);
-    const list = applFiltered(), prefDates = Array.from(new Set(all.map((x) => x.pref_date).filter(Boolean))).sort();
+    const list = applFiltered(), prefDates = Array.from(new Set(all.map((x) => roundDate(x.pref_date)).filter(Boolean))).sort();
+    const onDate = a.date && a.date !== "__none" ? all.filter((x) => roundDate(x.pref_date) === a.date) : [];
+    const prefTimes = Array.from(new Set(onDate.map((x) => String(x.pref_date || "").slice(11)).filter(Boolean))).sort();
+    const hasNoTime = onDate.some((x) => !String(x.pref_date || "").slice(11));
+    const cntWait = (f) => { const w = wait.filter(f); return " · 대기 " + w.length + "명(남 " + w.filter((x) => x.gender === "M").length + " 여 " + w.filter((x) => x.gender === "F").length + ")"; };
     const sel = list.filter((x) => a.sel[x.id] && !x.assigned_round), tg = applTarget();
     const cnt = (g) => wait.filter((x) => x.gender === g).length;
     const tr = S.rounds.find((r) => r.id === tg), baseM = tr ? tr.male || 0 : 0, baseF = tr ? tr.female || 0 : 0;
@@ -545,7 +550,8 @@
       </section>
       <section class="panel"><h2>날짜에 배정 <span class="sub">사진과 성비를 보고 정해요</span></h2>
         <div class="filters">
-          <label class="mp"><span>신청한 날짜</span><select id="ap-date"><option value="" ${!a.date ? "selected" : ""}>전체</option>${prefDates.map((d) => `<option value="${d}" ${a.date === d ? "selected" : ""}>${esc(roundLabel(d))}</option>`).join("")}<option value="__none" ${a.date === "__none" ? "selected" : ""}>날짜 없음</option></select></label>
+          <label class="mp"><span>신청한 날짜</span><select id="ap-date"><option value="" ${!a.date ? "selected" : ""}>전체</option>${prefDates.map((d) => `<option value="${d}" ${a.date === d ? "selected" : ""}>${esc(roundLabel(d))}${esc(cntWait((x) => roundDate(x.pref_date) === d))}</option>`).join("")}<option value="__none" ${a.date === "__none" ? "selected" : ""}>날짜 없음</option></select></label>
+          ${prefTimes.length ? `<label class="mp"><span>신청한 시간</span><select id="ap-time"><option value="" ${!a.time ? "selected" : ""}>전체 시간</option>${prefTimes.map((t) => `<option value="${t}" ${a.time === t ? "selected" : ""}>${esc(t)}${esc(cntWait((x) => roundDate(x.pref_date) === a.date && String(x.pref_date || "").slice(11) === t))}</option>`).join("")}${hasNoTime ? `<option value="__none" ${a.time === "__none" ? "selected" : ""}>시간 없음</option>` : ""}</select></label>` : ""}
           <label class="mp"><span>성별</span><select id="ap-gender"><option value="" ${!a.gender ? "selected" : ""}>전체</option><option value="M" ${a.gender === "M" ? "selected" : ""}>남</option><option value="F" ${a.gender === "F" ? "selected" : ""}>여</option></select></label>
           <label class="ck"><input type="checkbox" id="ap-showdone" ${a.showAssigned ? "checked" : ""}> 배정된 사람도 보기</label>
         </div>
@@ -793,7 +799,8 @@
     const t = e.target;
     if (t.id === "round-select") { S.round = t.value; S.confirm = ""; S.openPick = {}; S.open = {}; S.pickEdit = {}; run(async () => {}); return; }
     if (t.id === "add-round") { S.add.round = t.value; render(); return; }
-    if (t.id === "ap-date") { S.appl.date = t.value; render(); return; }
+    if (t.id === "ap-date") { S.appl.date = t.value; S.appl.time = ""; render(); return; }
+    if (t.id === "ap-time") { S.appl.time = t.value; render(); return; }
     if (t.id === "ap-gender") { S.appl.gender = t.value; render(); return; }
     if (t.id === "ap-showdone") { S.appl.showAssigned = t.checked; render(); return; }
     if (t.id === "ap-target") { S.appl.target = t.value; render(); return; }

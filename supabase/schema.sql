@@ -96,7 +96,7 @@ create table if not exists public.applicants (
   school         text,
   mbti           text,
   hobby          text,
-  pref_date      text,                                  -- 신청한 날짜 YYYY-MM-DD (선호일, 배정과는 별개)
+  pref_date      text,                                  -- 신청한 날짜 YYYY-MM-DD (시간을 골랐으면 'YYYY-MM-DD HH:MM'), 배정과는 별개
   photo_url      text,
   assigned_round text,                                  -- 배정된 회차. null 이면 대기 중
   created_at     timestamptz not null default now()
@@ -711,7 +711,7 @@ begin
     ph := public._norm_phone(r->>'phone'); g := r->>'gender'; nm := nullif(trim(r->>'name'), '');
     pd := nullif(trim(r->>'pref_date'), ''); pu := nullif(trim(r->>'photo_url'), '');
     if ph = '' or nm is null or g is null or g not in ('M','F') then skipped := skipped + 1; continue; end if;
-    if pd is not null and pd !~ '^\d{4}-\d{2}-\d{2}$' then pd := null; end if;
+    if pd is not null and pd !~ '^\d{4}-\d{2}-\d{2}( \d{2}:\d{2})?$' then pd := null; end if;
     if pu is not null and pu !~* '^https?://' then pu := null; end if;
     if exists (select 1 from public.applicants where phone = ph) then
       update public.applicants set
