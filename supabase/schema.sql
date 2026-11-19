@@ -96,11 +96,12 @@ create table if not exists public.applicants (
   school         text,
   mbti           text,
   hobby          text,
-  pref_date      text,                                  -- 신청한 날짜 YYYY-MM-DD (시간을 골랐으면 'YYYY-MM-DD HH:MM'), 배정과는 별개
+  pref_date      text,                                  -- 신청한 날짜 YYYY-MM-DD (시간을 골랐으면 'YYYY-MM-DD HH:MM'), 배정과는 별개. 여러 개를 골랐으면 첫 번째(전체는 pref_dates)
   photo_url      text,
   assigned_round text,                                  -- 배정된 회차. null 이면 대기 중
   created_at     timestamptz not null default now()
 );
+alter table public.applicants add column if not exists pref_dates text[] not null default '{}';   -- 희망 날짜·시간 여러 개
 alter table public.applicants enable row level security;
 
 -- 유료 서비스 가격·입금 안내(진행자가 SQL 로 바꿀 수 있음): update app_settings set pay_info = '카카오뱅크 0000-00-0000 홍길동' where id = 1;
@@ -694,7 +695,7 @@ begin
   return coalesce((
     select jsonb_agg(jsonb_build_object(
       'id', a.id, 'phone', a.phone, 'gender', a.gender, 'name', a.name, 'age_label', a.age_label,
-      'school', a.school, 'mbti', a.mbti, 'hobby', a.hobby, 'pref_date', a.pref_date,
+      'school', a.school, 'mbti', a.mbti, 'hobby', a.hobby, 'pref_date', a.pref_date, 'pref_dates', to_jsonb(a.pref_dates),
       'photo_url', a.photo_url, 'assigned_round', a.assigned_round, 'created_at', a.created_at)
       order by a.created_at, a.name)
     from public.applicants a), '[]'::jsonb);
@@ -704,7 +705,7 @@ end $$;
 -- (브라우저에서 직접 호출하지 못하도록 아래에서 실행 권한을 막는다. 진행자 함수와 구글폼 수신 함수만 부른다.)
 create or replace function public._applicant_upsert(p_rows jsonb)
 returns jsonb language plpgsql security definer set search_path = public as $$
-declare r jsonb; ph text; g text; nm text; pd text; pu text; ins int := 0; upd int := 0; skipped int := 0;
+declare r jsonb; ph text; g text; nm text; pd text; pds text[]; pu text; ins int := 0; upd int := 0; skipped int := 0;
 begin
   if jsonb_typeof(p_rows) <> 'array' then raise exception 'invalid_rows'; end if;
   for r in select * from jsonb_array_elements(p_rows) loop
@@ -712,18 +713,23 @@ begin
     pd := nullif(trim(r->>'pref_date'), ''); pu := nullif(trim(r->>'photo_url'), '');
     if ph = '' or nm is null or g is null or g not in ('M','F') then skipped := skipped + 1; continue; end if;
     if pd is not null and pd !~ '^\d{4}-\d{2}-\d{2}( \d{2}:\d{2})?$' then pd := null; end if;
+    -- 희망 날짜가 여러 개면 pref_dates 배열로 받는다(각각 'YYYY-MM-DD' 또는 'YYYY-MM-DD HH:MM', 최대 10개). pref_date 만 오면 그 하나로.
+    pds := coalesce((select array_agg(v order by v) from (select distinct v from jsonb_array_elements_text(case when jsonb_typeof(r->'pref_dates') = 'array' then r->'pref_dates' else '[]'::jsonb end) v
+                      where v ~ '^\d{4}-\d{2}-\d{2}( \d{2}:\d{2})?$' limit 10) q), '{}'::text[]);
+    if cardinality(pds) = 0 and pd is not null then pds := array[pd]; end if;
+    if cardinality(pds) > 0 then pd := pds[1]; end if;
     if pu is not null and pu !~* '^https?://' then pu := null; end if;
     if exists (select 1 from public.applicants where phone = ph) then
       update public.applicants set
         gender = g, name = nm, age_label = nullif(trim(r->>'age_label'), ''), school = nullif(trim(r->>'school'), ''),
         mbti = nullif(upper(trim(r->>'mbti')), ''), hobby = nullif(trim(r->>'hobby'), ''),
-        pref_date = coalesce(pd, pref_date), photo_url = coalesce(pu, photo_url)
+        pref_date = coalesce(pd, pref_date), pref_dates = case when cardinality(pds) > 0 then pds else pref_dates end, photo_url = coalesce(pu, photo_url)
       where phone = ph;
       upd := upd + 1;
     else
-      insert into public.applicants (phone, gender, name, age_label, school, mbti, hobby, pref_date, photo_url)
+      insert into public.applicants (phone, gender, name, age_label, school, mbti, hobby, pref_date, pref_dates, photo_url)
       values (ph, g, nm, nullif(trim(r->>'age_label'), ''), nullif(trim(r->>'school'), ''),
-              nullif(upper(trim(r->>'mbti')), ''), nullif(trim(r->>'hobby'), ''), pd, pu);
+              nullif(upper(trim(r->>'mbti')), ''), nullif(trim(r->>'hobby'), ''), pd, pds, pu);
       ins := ins + 1;
     end if;
   end loop;
@@ -1024,7 +1030,7 @@ begin
   perform public._check_admin(p_pin);
   if p_kind = 'reserve' then
     return coalesce((
-      select jsonb_agg(jsonb_build_object('id', a.id, 'name', a.name, 'phone', a.phone, 'pref_date', a.pref_date,
+      select jsonb_agg(jsonb_build_object('id', a.id, 'name', a.name, 'phone', a.phone, 'pref_date', a.pref_date, 'pref_dates', to_jsonb(a.pref_dates),
         'sent', exists (select 1 from public.sms_log l where l.applicant_id = a.id and l.kind = 'reserve' and l.status = 'sent')) order by a.created_at)
       from public.applicants a
       where a.phone ~ '^01\d{8,9}$'), '[]'::jsonb);

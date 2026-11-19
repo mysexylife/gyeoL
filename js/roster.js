@@ -93,6 +93,19 @@
 
   const normMbti = (v) => (/^[EI][NS][TF][JP]$/i.test(String(v || "").trim()) ? String(v).trim().toUpperCase() : "");
   const dateTokens = (v) => String(v || "").match(/\d{1,2}\/\d{1,2}/g) || [];
+  // '11/8 (일) - 19:00-21:00, 11/9 (토) - 14:00-16:00' → ['2026-11-08 19:00', '2026-11-09 14:00']. 날짜마다 바로 뒤의 첫 시각을 붙인다
+  function prefList(v) {
+    v = String(v || "");
+    const re = /\d{1,2}\/\d{1,2}/g, hits = [];
+    let m; while ((m = re.exec(v))) hits.push({ tok: m[0], at: m.index + m[0].length });
+    const out = [];
+    hits.forEach((h, i) => {
+      const seg = v.slice(h.at, i + 1 < hits.length ? hits[i + 1].at - hits[i + 1].tok.length : v.length);
+      const id = root.RN.toRoundId(h.tok) + timeOf(seg);
+      if (!out.includes(id)) out.push(id);
+    });
+    return out;
+  }
   // '11/8 (일) - 19:00-21:00' 에서 시작 시각을 ' 19:00' 으로. 없으면 ''
   const timeOf = (v) => { const m = String(v || "").match(/(\d{1,2}):(\d{2})/); return m ? " " + String(m[1]).padStart(2, "0") + ":" + m[2] : ""; };
 
@@ -160,7 +173,8 @@
       });
       if (opts.applicant) {   // 신청자 대기 명단: 신청한 날짜(선호일)와 사진 링크도 담는다
         const last = out[out.length - 1], tk = dateTokens(cellOf(r, map.date));
-        last.pref_date = tk.length === 1 && root.RN ? root.RN.toRoundId(tk[0]) + timeOf(cellOf(r, map.date)) : "";   // 시간대를 골랐으면 ' HH:MM'(시작 시각)까지
+        last.pref_dates = root.RN ? prefList(cellOf(r, map.date)) : [];   // 고른 날짜·시간을 모두(시간대를 골랐으면 ' HH:MM' 시작 시각까지)
+        last.pref_date = last.pref_dates[0] || "";
         const ph = cellOf(r, map.photo);
         last.photo_url = /^https?:\/\//i.test(ph) ? ph : "";
       }

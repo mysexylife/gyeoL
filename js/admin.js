@@ -1,7 +1,7 @@
 /* 진행자 화면: 단계 전환, 참가 현황, 매칭, 설문 집계, CSV */
 (() => {
   const api = window.api;
-  const { SURVEY, MAX_PICKS, friendly, splitSchool, fmtPhone, normPhone, roundLabel, roundTag, roundDate, mkRound, isRoundId, toRoundId, todayISO, digits } = window.RN;
+  const { applPrefs, SURVEY, MAX_PICKS, friendly, splitSchool, fmtPhone, normPhone, roundLabel, roundTag, roundDate, mkRound, isRoundId, toRoundId, todayISO, digits } = window.RN;
   const Roster = window.Roster;   // 나이·MBTI 정리에만 쓴다 (명단 가져오기는 쓰지 않음)
   const $app = document.getElementById("app");
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -380,7 +380,7 @@
   }
   function smsVars(kind, person) {
     const v = { 이름: person ? person.name : "홍길동", 링크: entryUrl() };
-    if (kind === "reserve") v.희망날짜 = person ? fmtMD(person.pref_date) : fmtMD(todayISO());
+    if (kind === "reserve") v.희망날짜 = person ? applPrefs(person).map((d) => fmtMD(d) + (d.slice(11) ? " " + d.slice(11) : "")).join(", ") : fmtMD(todayISO());
     if (kind === "confirm") {
       v.일시 = S.sms.when.trim() || fmtWhen(S.round); v.장소 = S.sms.venue.trim(); v.지도 = S.sms.map.trim();
       v.도착시간 = arriveTime(v.일시);   // 시작 시간 10분 전. 일시에 시간이 없으면 비어서 그 줄이 빠진다
@@ -428,7 +428,7 @@
       <button class="link" data-act="sms-tpl-reset" style="justify-self:start">이 문안을 기본 문구로 되돌리기</button>
       <h3 class="sub-h">받는 사람 선택 <span class="sub" id="sms-selcount">${smsSelIds().length}명 선택 / 목록 ${S.sms.list.length}명</span></h3>
       <div class="filters"><button class="btn sm ghost" data-act="sms-sel" data-v="unsent">아직 안 보낸 사람만</button><button class="btn sm ghost" data-act="sms-sel" data-v="all">전체 선택</button><button class="btn sm ghost" data-act="sms-sel" data-v="none">전체 해제</button></div>
-      ${S.sms.list.length ? `<div class="rows smslist">${S.sms.list.map((x) => `<label class="row apck-row"><input type="checkbox" data-sms-sel="${x.id}" ${S.sms.sel[kind + ":" + x.id] ? "checked" : ""} aria-label="${esc(x.name)} 선택"><span class="rm"><b>${x.number ? x.number + "번 " : ""}${esc(x.name)}</b> <span class="sub">${esc(fmtPhone(x.phone))}</span>${x.gender ? ` <span class="pg g-${x.gender}">${x.gender === "M" ? "남" : "여"}</span>` : ""}${kind === "reserve" && x.pref_date ? ` <span class="sub">${esc(fmtMD(x.pref_date))}</span>` : ""}</span>${x.sent ? `<span class="tag y">발송됨</span>` : `<span class="tag n">미발송</span>`}</label>`).join("")}</div>` : `<p class="sub">${kind === "result" && !open ? "결과를 공개하면 목록이 나와요." : "보낼 수 있는 사람이 없어요."}</p>`}
+      ${S.sms.list.length ? `<div class="rows smslist">${S.sms.list.map((x) => `<label class="row apck-row"><input type="checkbox" data-sms-sel="${x.id}" ${S.sms.sel[kind + ":" + x.id] ? "checked" : ""} aria-label="${esc(x.name)} 선택"><span class="rm"><b>${x.number ? x.number + "번 " : ""}${esc(x.name)}</b> <span class="sub">${esc(fmtPhone(x.phone))}</span>${x.gender ? ` <span class="pg g-${x.gender}">${x.gender === "M" ? "남" : "여"}</span>` : ""}${kind === "reserve" && applPrefs(x).length ? ` <span class="sub">${esc(applPrefs(x).map((d) => fmtMD(d) + (d.slice(11) ? " " + d.slice(11) : "")).join(", "))}</span>` : ""}</span>${x.sent ? `<span class="tag y">발송됨</span>` : `<span class="tag n">미발송</span>`}</label>`).join("")}</div>` : `<p class="sub">${kind === "result" && !open ? "결과를 공개하면 목록이 나와요." : "보낼 수 있는 사람이 없어요."}</p>`}
       <p class="note">이미 보낸 사람도 체크하면 다시 보낼 수 있어요. <b>스크립트를 받은 뒤, 맥북에서 실행을 마치고 [발송 완료로 표시]</b>를 눌러야 기록돼요.</p>
       <h3 class="sub-h">보내는 순서</h3>
       <ol class="how"><li><b>테스트 스크립트</b>로 내 번호에 먼저 1건 보내 봅니다.</li><li>잘 오면 <b>발송 스크립트</b>를 받아 맥북의 <b>스크립트 편집기</b>로 열고 ▶ 실행합니다(한 명씩 5초 간격으로 나가요).</li><li>끝나면 <b>발송 완료로 표시</b>를 눌러 선택한 사람을 기록합니다(중복 발송 방지).</li></ol>
@@ -508,19 +508,21 @@
     const a = S.appl, known = applKnownRounds();
     return a.target && (a.target === "__new" || known.some((r) => r.id === a.target)) ? a.target : (known.some((r) => r.id === S.round) ? S.round : "__new");
   }
+  // 신청자가 고른 희망 날짜·시간 중 그 날짜에 해당하는 것들
+  const prefsOn = (x, date) => applPrefs(x).filter((p) => roundDate(p) === date);
   function applFiltered() {
     const a = S.appl;
     return S.applicants.filter((x) => (a.showAssigned || !x.assigned_round)
       && (!a.gender || x.gender === a.gender)
-      && (!a.date || (a.date === "__none" ? !x.pref_date : roundDate(x.pref_date) === a.date))
-      && (!a.time || a.date === "__none" || !a.date || (a.time === "__none" ? !String(x.pref_date || "").slice(11) : String(x.pref_date || "").slice(11) === a.time)));
+      && (!a.date || (a.date === "__none" ? !applPrefs(x).length : prefsOn(x, a.date).length > 0))
+      && (!a.time || !a.date || a.date === "__none" || prefsOn(x, a.date).some((p) => (p.slice(11) || "__none") === a.time)));
   }
   function tabApplicants() {
     const a = S.appl, all = S.applicants, wait = all.filter((x) => !x.assigned_round);
-    const list = applFiltered(), prefDates = Array.from(new Set(all.map((x) => roundDate(x.pref_date)).filter(Boolean))).sort();
-    const onDate = a.date && a.date !== "__none" ? all.filter((x) => roundDate(x.pref_date) === a.date) : [];
-    const prefTimes = Array.from(new Set(onDate.map((x) => String(x.pref_date || "").slice(11)).filter(Boolean))).sort();
-    const hasNoTime = onDate.some((x) => !String(x.pref_date || "").slice(11));
+    const list = applFiltered(), prefDates = Array.from(new Set(all.flatMap((x) => applPrefs(x).map(roundDate)).filter(Boolean))).sort();
+    const onDate = a.date && a.date !== "__none" ? all.filter((x) => prefsOn(x, a.date).length) : [];
+    const prefTimes = Array.from(new Set(onDate.flatMap((x) => prefsOn(x, a.date).map((p) => p.slice(11))).filter(Boolean))).sort();
+    const hasNoTime = onDate.some((x) => prefsOn(x, a.date).some((p) => !p.slice(11)));
     const cntWait = (f) => { const w = wait.filter(f); return " · 대기 " + w.length + "명(남 " + w.filter((x) => x.gender === "M").length + " 여 " + w.filter((x) => x.gender === "F").length + ")"; };
     const sel = list.filter((x) => a.sel[x.id] && !x.assigned_round), tg = applTarget();
     const cnt = (g) => wait.filter((x) => x.gender === g).length;
@@ -530,7 +532,7 @@
     const chev = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>`;
     const rowsHtml = list.map((x) => {
       const open = !!S.open["ap" + x.id], done = !!x.assigned_round;
-      const det = [["나이", x.age_label], ["대학·학과", splitSchool(x.school).filter(Boolean).join(" · ")], ["MBTI", x.mbti], ["취미", x.hobby], ["신청 날짜", x.pref_date ? roundLabel(x.pref_date) : "-"]]
+      const det = [["나이", x.age_label], ["대학·학과", splitSchool(x.school).filter(Boolean).join(" · ")], ["MBTI", x.mbti], ["취미", x.hobby], ["신청 날짜", applPrefs(x).length ? applPrefs(x).map(roundLabel).join(", ") : "-"]]
         .map(([k, v]) => `<div><dt>${k}</dt><dd>${esc(v || "-")}</dd></div>`).join("");
       return `<div class="prow ${open ? "open" : ""} ${done ? "done" : ""}" role="listitem">
         <div class="pmain apmain">
@@ -550,8 +552,8 @@
       </section>
       <section class="panel"><h2>날짜에 배정 <span class="sub">사진과 성비를 보고 정해요</span></h2>
         <div class="filters">
-          <label class="mp"><span>신청한 날짜</span><select id="ap-date"><option value="" ${!a.date ? "selected" : ""}>전체</option>${prefDates.map((d) => `<option value="${d}" ${a.date === d ? "selected" : ""}>${esc(roundLabel(d))}${esc(cntWait((x) => roundDate(x.pref_date) === d))}</option>`).join("")}<option value="__none" ${a.date === "__none" ? "selected" : ""}>날짜 없음</option></select></label>
-          ${prefTimes.length ? `<label class="mp"><span>신청한 시간</span><select id="ap-time"><option value="" ${!a.time ? "selected" : ""}>전체 시간</option>${prefTimes.map((t) => `<option value="${t}" ${a.time === t ? "selected" : ""}>${esc(t)}${esc(cntWait((x) => roundDate(x.pref_date) === a.date && String(x.pref_date || "").slice(11) === t))}</option>`).join("")}${hasNoTime ? `<option value="__none" ${a.time === "__none" ? "selected" : ""}>시간 없음</option>` : ""}</select></label>` : ""}
+          <label class="mp"><span>신청한 날짜</span><select id="ap-date"><option value="" ${!a.date ? "selected" : ""}>전체</option>${prefDates.map((d) => `<option value="${d}" ${a.date === d ? "selected" : ""}>${esc(roundLabel(d))}${esc(cntWait((x) => prefsOn(x, d).length > 0))}</option>`).join("")}<option value="__none" ${a.date === "__none" ? "selected" : ""}>날짜 없음</option></select></label>
+          ${prefTimes.length ? `<label class="mp"><span>신청한 시간</span><select id="ap-time"><option value="" ${!a.time ? "selected" : ""}>전체 시간</option>${prefTimes.map((t) => `<option value="${t}" ${a.time === t ? "selected" : ""}>${esc(t)}${esc(cntWait((x) => prefsOn(x, a.date).some((p) => p.slice(11) === t)))}</option>`).join("")}${hasNoTime ? `<option value="__none" ${a.time === "__none" ? "selected" : ""}>시간 없음</option>` : ""}</select></label>` : ""}
           <label class="mp"><span>성별</span><select id="ap-gender"><option value="" ${!a.gender ? "selected" : ""}>전체</option><option value="M" ${a.gender === "M" ? "selected" : ""}>남</option><option value="F" ${a.gender === "F" ? "selected" : ""}>여</option></select></label>
           <label class="ck"><input type="checkbox" id="ap-showdone" ${a.showAssigned ? "checked" : ""}> 배정된 사람도 보기</label>
         </div>
@@ -690,7 +692,7 @@
       if (!b || !b.rows.length) return;
       if (im.dest === "applicants") {
         return run(async () => {
-          const rows = b.rows.map((p) => ({ phone: p.phone, gender: p.gender, name: p.name, age_label: p.age_label, school: p.school, mbti: p.mbti, hobby: p.hobby, pref_date: p.pref_date, photo_url: p.photo_url }));
+          const rows = b.rows.map((p) => ({ phone: p.phone, gender: p.gender, name: p.name, age_label: p.age_label, school: p.school, mbti: p.mbti, hobby: p.hobby, pref_date: p.pref_date, pref_dates: p.pref_dates, photo_url: p.photo_url }));
           im.done = await api.admin.applicantImport(S.pin, rows);
           S.tab = "applicants";
           toast("신청자 명단에 넣었어요. 이제 날짜에 배정해 주세요.");

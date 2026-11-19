@@ -493,7 +493,7 @@
           s.smsLog = s.smsLog || {};
           if (kind === "reserve") {
             const done = s.smsLog.reserve || [];
-            return (s.applicants || []).map((a) => ({ id: a.id, name: a.name, phone: a.phone, pref_date: a.pref_date, sent: done.includes(a.id) }));
+            return (s.applicants || []).map((a) => ({ id: a.id, name: a.name, phone: a.phone, pref_date: a.pref_date, pref_dates: a.pref_dates || (a.pref_date ? [a.pref_date] : []), sent: done.includes(a.id) }));
           }
           if (kind === "result" && !(s.rounds[round] && s.rounds[round].results_open)) fail("results_not_open");
           const done = s.smsLog[kind + ":" + round] || [];
@@ -568,12 +568,14 @@
           rows.forEach((r) => {
             const ph = normPhone(r.phone), g = r.gender, nm = String(r.name || "").trim();
             if (!ph || !nm || !["M", "F"].includes(g)) { skipped++; return; }
-            const pd = ISO_RE.test(String(r.pref_date || "")) ? r.pref_date : null;
+            let pds = (Array.isArray(r.pref_dates) ? r.pref_dates : []).filter((v) => ISO_RE.test(String(v))).slice(0, 10);
+            if (!pds.length && ISO_RE.test(String(r.pref_date || ""))) pds = [r.pref_date];
+            const pd = pds[0] || null;
             const pu = /^https?:\/\//i.test(String(r.photo_url || "")) ? r.photo_url : null;
             const f = { gender: g, name: nm, age_label: r.age_label || null, school: r.school || null, mbti: (r.mbti || "").toUpperCase() || null, hobby: r.hobby || null };
             const ex = s.applicants.find((a) => a.phone === ph);
-            if (ex) { Object.assign(ex, f); if (pd) ex.pref_date = pd; if (pu) ex.photo_url = pu; upd++; }
-            else { s.applicants.push(Object.assign({ id: "a" + s.seq++, phone: ph, pref_date: pd, photo_url: pu, assigned_round: null, created_at: new Date().toISOString() }, f)); ins++; }
+            if (ex) { Object.assign(ex, f); if (pd) { ex.pref_date = pd; ex.pref_dates = pds; } if (pu) ex.photo_url = pu; upd++; }
+            else { s.applicants.push(Object.assign({ id: "a" + s.seq++, phone: ph, pref_date: pd, pref_dates: pds, photo_url: pu, assigned_round: null, created_at: new Date().toISOString() }, f)); ins++; }
           });
           return { inserted: ins, updated: upd, skipped };
         }),
@@ -643,5 +645,7 @@
   }
 
   window.api = isDemo ? demoApi() : liveApi();
-  window.RN = { SURVEY, MAX_PICKS, MEMO_SLOTS, roundLabel, roundTag, roundDate, mkRound, isRoundId, toRoundId, dateChoices, todayISO, friendly, digits, normPhone, fmtPhone, splitSchool, splitHobby };
+  // 신청자의 희망 날짜·시간 목록(예전 데이터는 pref_date 하나만 있다)
+  const applPrefs = (a) => (a && Array.isArray(a.pref_dates) && a.pref_dates.length ? a.pref_dates : a && a.pref_date ? [a.pref_date] : []);
+  window.RN = { applPrefs, SURVEY, MAX_PICKS, MEMO_SLOTS, roundLabel, roundTag, roundDate, mkRound, isRoundId, toRoundId, dateChoices, todayISO, friendly, digits, normPhone, fmtPhone, splitSchool, splitHobby };
 })();

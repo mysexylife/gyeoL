@@ -104,7 +104,7 @@ function buildRow(nv) {
     school: pick(nv, "school").replace(/\s+/g, " "),
     mbti: normMbti(pick(nv, "mbti")),
     hobby: pick(nv, "hobby").replace(/\s*\n\s*/g, ", "),
-    pref_date: prefDate(pick(nv, "date")),
+    pref_dates: prefDates(pick(nv, "date")),
     photo_url: /^https?:\/\//i.test(photo) ? photo : "",
   };
 }
@@ -122,15 +122,20 @@ function normAge(v) {
 }
 const normMbti = (v) => (/^[EI][NS][TF][JP]$/i.test(String(v || "").trim()) ? String(v).trim().toUpperCase() : "");
 
-// "11/8 (일) - 19:00-21:00" → "2026-11-08 19:00" (시작 시각까지). 날짜를 하나만 골랐을 때만 쓴다. 5개월 넘게 지난 날짜면 내년으로 본다.
-// 시각이 없으면 "2026-11-08" 만.
-function prefDate(v) {
-  const t = String(v || "").match(/\d{1,2}\/\d{1,2}/g) || [];
-  if (t.length !== 1) return "";
-  const [mo, d] = t[0].split("/").map(Number);
-  const now = new Date();
-  let y = now.getFullYear();
-  if ((now - new Date(y, mo - 1, d)) / 86400000 > 150) y += 1;
-  const tm = String(v).match(/(\d{1,2}):(\d{2})/);
-  return y + "-" + String(mo).padStart(2, "0") + "-" + String(d).padStart(2, "0") + (tm ? " " + String(tm[1]).padStart(2, "0") + ":" + tm[2] : "");
+// 폼의 날짜 답변을 모두 읽는다. "11/8 (일) - 19:00-21:00, 11/9 (토) - 14:00-16:00" → ["2026-11-08 19:00", "2026-11-09 14:00"]
+// 날짜마다 바로 뒤의 첫 시각(시작 시각)을 붙이고, 시각이 없으면 날짜만. 5개월 넘게 지난 날짜면 내년으로 본다.
+function prefDates(v) {
+  v = String(v || "");
+  const re = /\d{1,2}\/\d{1,2}/g, hits = [], out = [], now = new Date();
+  let m; while ((m = re.exec(v))) hits.push({ tok: m[0], at: m.index + m[0].length });
+  hits.forEach((h, i) => {
+    const seg = v.slice(h.at, i + 1 < hits.length ? hits[i + 1].at - hits[i + 1].tok.length : v.length);
+    const [mo, d] = h.tok.split("/").map(Number);
+    let y = now.getFullYear();
+    if ((now - new Date(y, mo - 1, d)) / 86400000 > 150) y += 1;
+    const tm = seg.match(/(\d{1,2}):(\d{2})/);
+    const id = y + "-" + String(mo).padStart(2, "0") + "-" + String(d).padStart(2, "0") + (tm ? " " + String(tm[1]).padStart(2, "0") + ":" + tm[2] : "");
+    if (out.indexOf(id) < 0) out.push(id);
+  });
+  return out;
 }
