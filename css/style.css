@@ -645,3 +645,13 @@ button.brand { background: none; border: 0; padding: 4px 0; cursor: pointer; -we
 .smslist .row.apck-row input { width: 20px; height: 20px; accent-color: var(--accent); }
 /* 문자 종류 5개가 한 줄에 들어가게 */
 .smsseg button { white-space: nowrap; font-size: 12.5px; padding-left: 2px; padding-right: 2px; }
+/* 안내 문자: 간단한 흐름 */
+.smslist { max-height: 300px; }
+.smsall { border-bottom: 1px solid var(--line); border-radius: 0; }
+.smsflow .filters { align-items: end; }
+.smsflow pre#sms-preview { white-space: pre-wrap; font: inherit; font-size: 13.5px; background: rgba(0, 0, 0, .04); padding: 10px 12px; border-radius: 10px; margin: 0; }
+.smslist .row.smsall, .row.smsall { display: flex; gap: 10px; align-items: center; padding: 8px 4px; }
+.row.smsall input { width: 20px; height: 20px; accent-color: var(--accent); flex: none; }
+.row.smsall .rm { display: flex; gap: 8px; align-items: baseline; white-space: nowrap; }
+.smslist .row.apck-row { padding: 6px 10px; }
+.smslist .row.apck-row .rm { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }

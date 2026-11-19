@@ -6,7 +6,7 @@
   const $app = document.getElementById("app");
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
-  const S = { pin: "", data: null, paid: [], thr: [], applicants: [], appl: { date: "", time: "", gender: "", showAssigned: false, sel: {}, target: "", newdate: "", newtime: "" }, error: "", confirm: "", busy: false, round: "", rounds: [], tab: "picks", open: {}, openPick: {}, pickEdit: {}, onlyBad: false, onlyAbsent: false, sms: { test: "", last: null, kind: "reserve", venue: "", map: "", when: "", counts: null, tpl: {}, list: [], sel: {}, wasSent: {}, dbOk: true, reason: "", refund: "", f: { gender: "", status: "unsent", q: "", date: "", time: "", arrived: "", assigned: "", src: "" } },
+  const S = { pin: "", data: null, paid: [], thr: [], applicants: [], appl: { date: "", time: "", gender: "", showAssigned: false, sel: {}, target: "", newdate: "", newtime: "" }, error: "", confirm: "", busy: false, round: "", rounds: [], tab: "picks", open: {}, openPick: {}, pickEdit: {}, onlyBad: false, onlyAbsent: false, sms: { test: "", last: null, kind: "reserve", venue: "", map: "", when: "", counts: null, tpl: {}, list: [], sel: {}, wasSent: {}, dbOk: true, f: { status: "unsent", q: "", date: "", time: "", src: "" } },
     add: { open: false, editing: false, round: "", newdate: "", newtime: "", name: "", gender: "", phone: "", number: "", age: "", school: "", mbti: "", hobby: "" },
   };
   try { S.pin = sessionStorage.getItem("rn_admin_pin") || ""; S.round = sessionStorage.getItem("rn_admin_round") || ""; S.tab = sessionStorage.getItem("rn_admin_tab") || "applicants"; } catch (e) { /* 저장소 사용 불가 */ }
@@ -247,16 +247,14 @@
   /* ───────── 안내 문자(예약 확인 · 전날 확정 · 결과 안내): 맥북 메시지 앱으로 보내는 스크립트 ───────── */
   const SMS_KINDS = [["reserve", "신청 완료"], ["join", "참가 확정"], ["confirm", "장소 안내"], ["result", "결과 안내"], ["cancel", "행사 취소"]];
   // 보내는 순서(진행 단계)와 때. 기본 필터는 모두 "아직 안 보낸 사람"이라, 늦게 등록한 사람은 나중에 같은 화면에서 미발송만 골라 보내면 된다
-  const SMS_STEP = { reserve: "① 신청 직후 · 신규 신청자(아직 신청 안내를 못 받은 사람)에게", join: "② 행사 2일 전 · 신청자를 참가자로 배정한 뒤, 그 회차 참가자에게", confirm: "③ 행사 1일 전 · 그 회차 참가자에게 (일시·장소·지도)", result: "④ 결과 공개 후 · 그 회차 참가자에게 (결과는 링크로만)", cancel: "⑤ 행사 취소 시 · 그 회차 참가자 + 그 회차를 신청했지만 아직 배정 전인 신청자에게" };
+  const SMS_STEP = { reserve: "신청 직후 · 신규 신청자에게", join: "행사 2일 전 · 그 회차 참가자에게", confirm: "행사 1일 전 · 그 회차 참가자에게", result: "결과 공개 후 · 그 회차 참가자에게", cancel: "행사를 열 수 없을 때 · 그 회차 참가자와 신청자에게" };
   const SMS_DEFAULT = {
-    reserve: ["안녕하세요, 로테이션 소개팅 [결] 운영진입니다 :)", "신청과 입금이 확인되어 예약이 잘 접수되었어요!", "", "신청하신 날짜: {희망날짜}", "", "일시와 장소는 행사 전날 문자로 다시 확정해서 안내드릴게요."].join("\n"),
-    join: ["안녕하세요, 로테이션 소개팅 [결]입니다 🧶", "{일시} 로테이션 소개팅 참가가 확정되었어요!", "", "장소와 자세한 안내는 행사 전날 문자로 다시 알려드릴게요.", "혹시 참석이 어려워지시면 미리 연락 부탁드려요.", "그날 뵐게요 💘"].join("\n"),
-    confirm: ["안녕하세요, 로테이션 소개팅 [결]입니다 🧶", "행사 장소와 시간 안내드립니다!", "", "📅 일시 : {일시}", "📍 장소 : {장소}", "🗺️ 지도 : {지도}", "", "⏰ 원활한 진행을 위해 {도착시간}까지 꼭 도착해주세요!", "늦게 오시면 로테이션 순서에 함께하기 어려울 수 있어요.", "", "🎓 입장할 때 학생증을 확인해요. 실물이나 모바일 학생증 등 학교를 확인할 수 있는 물품을 꼭 챙겨주세요!", "☕ 간단한 다과가 준비되어 있어요.", "", "혹시 늦거나 못 오시게 되면 전날까지 미리 연락 부탁드려요.", "내일 뵐게요 💘"].join("\n"),
-    cancel: ["안녕하세요, 로테이션 소개팅 [결] 운영진입니다.", "{일시} 행사가 {취소사유} 때문에 부득이하게 취소되었어요. 기대하고 계셨을 텐데 정말 죄송합니다 🙏", "", "{환불안내}", "", "번거로움을 드려 죄송합니다. 다음 회차에서 꼭 다시 뵙고 싶어요.", "소식은 인스타그램 @gyeol.meet_official 에서 확인하실 수 있어요."].join("\n"),
-    result: ["안녕하세요, 로테이션 소개팅 [결] 운영진입니다 :)", "오늘 참여해 주셔서 감사합니다!", "", "최종 선택 결과가 나왔어요.", "아래 링크에서 로그인 후 최종선택 탭에서 확인해 주세요.", "{링크}", "", "인스타그램을 팔로우하면 다음 회차 소식과 콘텐츠를 확인하실 수 있어요ㅎㅎ", "→ @gyeol.meet_official"].join("\n"),
+    reserve: ["안녕하세요, 로테이션 소개팅 [결] 운영진입니다 :)", "{이름}님, 신청과 입금이 확인되어 신청이 완료되었어요 💌", "", "신청하신 날짜: {희망날짜}", "", "성비를 고려해 참가 확정 여부는 행사 2일 전까지 문자로 안내드릴게요.", "조금만 기다려주세요 🙂"].join("\n"),
+    join: ["안녕하세요, 로테이션 소개팅 [결] 운영진입니다 :)", "{이름}님, 로테이션 소개팅 참가가 확정되었어요 🎉", "", "📅 일시 : {일시}", "📍 장소 : 신촌·홍대 근처 카페", "", "정확한 장소와 지도 링크는 행사 하루 전에 문자로 다시 안내드릴게요.", "", "설레는 만남 준비해두고 기다릴게요 💗"].join("\n"),
+    confirm: ["안녕하세요, 로테이션 소개팅 [결] 운영진입니다 🧶", "내일 행사 장소와 시간 안내드립니다!", "", "📅 일시 : {일시}", "📍 장소 : {장소}", "🗺️ 지도 : {지도}", "", "⏰ 원활한 진행을 위해 {도착시간}까지 꼭 도착해주세요!", "", "🎓 입장할 때 학생증을 확인해요. 실물이나 모바일 학생증 등 학교를 확인할 수 있는 물품을 꼭 챙겨주세요!", "☕ 간단한 음료와 다과가 준비되어 있어요.", "", "혹시 늦거나 못 오시게 되면 미리 연락 부탁드려요.", "내일 뵐게요 💘"].join("\n"),
+    result: ["안녕하세요, 로테이션 소개팅 [결] 운영진입니다 :)", "오늘 함께해 주셔서 정말 감사합니다 🙏", "", "최종 선택 결과가 공개되었어요!", "아래 링크에서 로그인 후 '최종선택' 탭에서 확인해 주세요 💘", "{링크}", "", "서로 선택한 분이 있다면 그곳에서 연락처를 확인하실 수 있어요.", "인스타그램을 팔로우하면 다음 회차 소식과 콘텐츠를 가장 먼저 받아보실 수 있어요 ㅎㅎ", "→ @gyeol.meet_official"].join("\n"),
+    cancel: ["안녕하세요, 로테이션 소개팅 [결] 운영진입니다.", "{이름}님, [결]에 신청해 주셔서 진심으로 감사드려요 🙏", "", "아쉽게도 {일시} 회차는 성비 문제로 부득이하게 참여가 어려워졌어요.", "기대하고 계셨을 텐데 정말 죄송합니다.", "", "혹시 다음 회차로 옮겨서 참여하실 수 있을까요?", "다음 회차 일정에 맞춰 우선으로 자리를 마련해 드릴게요 💌", "", "▶ 다음 회차로 이동을 원하시면 \"이동\"", "▶ 환불을 원하시면 \"환불\"과 함께 환불받으실 계좌", "", "이 번호로 답장 주시면 바로 처리해 드릴게요.", "환불을 선택하셔도 참가비는 전액 돌려드려요.", "", "소식은 인스타그램 @gyeol.meet_official 에서도 확인하실 수 있어요."].join("\n"),
   };
-  const SMS_WHO = { reserve: "신청자(구글폼으로 들어온 사람)", join: "이 날짜(회차)에 배정된 참가자", confirm: "이 날짜(회차)에 배정된 참가자 중 아직 받지 않은 사람", result: "이 날짜(회차) 참가자 중 아직 받지 않은 사람 (결과를 공개한 뒤에만)", cancel: "이 날짜(회차)에 배정된 참가자 중 아직 받지 않은 사람 (행사를 취소할 때)" };
-  // 문안과 회차별 일시·장소·지도는 DB 에 저장해 어느 기기에서 열어도 같다. (SQL 을 아직 안 돌렸다면 이 화면에서만 유지)
   const smsStoreKey = "rn_sms_tpl_v1";
   let smsTimer = null;   // 입력 후 잠깐 기다렸다 저장(타자마다 서버를 부르지 않게)
   function smsTpl(kind) {
@@ -269,7 +267,7 @@
     const kind = S.sms.kind, round = S.round, tpl = S.sms.tpl[kind] || "";
     try {
       await api.admin.smsSaveTpl(S.pin, kind, tpl);
-      if (round) await api.admin.smsSaveRound(S.pin, round, S.sms.when, S.sms.venue, S.sms.map, { reason: S.sms.reason, refund: S.sms.refund });
+      if (round) await api.admin.smsSaveRound(S.pin, round, S.sms.when, S.sms.venue, S.sms.map, {});
     } catch (e) { if (S.sms.dbOk) toast("문안을 서버에 저장하지 못했어요(SQL 최신본을 실행했는지 확인). 이 화면에서만 유지돼요."); S.sms.dbOk = false; }
   }
   function smsSaveTpl(kind, text) { S.sms.tpl[kind] = text; smsQueueSave(); }
@@ -279,7 +277,7 @@
     try {
       const c = await api.admin.smsGet(S.pin, S.round);
       S.sms.dbOk = true;
-      if (!typing) { S.sms.tpl = c.tpl || {}; S.sms.when = c.when || ""; S.sms.venue = c.venue || ""; S.sms.map = c.map || ""; S.sms.reason = (c.extra && c.extra.reason) || ""; S.sms.refund = (c.extra && c.extra.refund) || ""; }
+      if (!typing) { S.sms.tpl = c.tpl || {}; S.sms.when = c.when || ""; S.sms.venue = c.venue || ""; S.sms.map = c.map || ""; }
     } catch (e) { S.sms.dbOk = false; }
     let list = [];
     try { list = S.round || S.sms.kind === "reserve" ? await api.admin.smsPending(S.pin, S.round, S.sms.kind) : []; } catch (e) { list = []; }   // 결과 미공개 등은 빈 목록
@@ -292,16 +290,12 @@
     });
     S.sms.list = list;
   }
-  // 필터(성별·발송 상태·검색·날짜·도착 여부)에 걸려 화면에 보이는 사람들
+  // 필터(발송 상태·검색·날짜·대상 구분)에 걸려 화면에 보이는 사람들
   function smsVisible() {
     const f = S.sms.f, q = f.q.trim().toLowerCase(), qd = f.q.replace(/\D/g, "");
-    const arrived = new Map(((S.data && S.data.participants) || []).map((p) => [p.id, !!p.arrived]));
-    return S.sms.list.filter((x) => (!f.gender || x.gender === f.gender)
-      && (!f.status || (f.status === "sent" ? x.sent : !x.sent))
+    return S.sms.list.filter((x) => (!f.status || (f.status === "sent" ? x.sent : !x.sent))
       && (!q || String(x.name || "").toLowerCase().includes(q) || (qd.length >= 3 && String(x.phone || "").includes(qd)))
       && (S.sms.kind !== "reserve" || !f.date || (f.date === "__none" ? !applPrefs(x).length : applPrefs(x).some((d) => roundDate(d) === f.date && (!f.time || (d.slice(11) || "__none") === f.time))))
-      && (S.sms.kind === "reserve" || x.src === "applicant" || !f.arrived || (f.arrived === "yes") === !!arrived.get(x.id))
-      && (S.sms.kind !== "reserve" || !f.assigned || (f.assigned === "yes") === !!x.assigned_round)
       && (S.sms.kind !== "cancel" || !f.src || x.src === f.src));
   }
   // 보낼 사람 = 화면에 보이는 사람 중 체크된 사람 (필터로 가려진 사람은 보내지 않는다)
@@ -322,12 +316,12 @@
     const m = String(roundId || "").match(/^(\d{4})-(\d{2})-(\d{2})(?: (\d{2}:\d{2}))?/);
     return m ? parseInt(m[2], 10) + "월 " + parseInt(m[3], 10) + "일(" + WDAY[new Date(+m[1], +m[2] - 1, +m[3]).getDay()] + ")" + (m[4] ? " " + m[4] : "") : "";
   }
-  // '11월 14일(토) 18:00 - 20:00' 의 첫 시각에서 10분을 뺀 도착 시각(17:50). 시각이 없으면 빈 값
+  // '11월 14일(토) 18:00 - 20:00' 의 첫 시각에서 10분을 더한 도착 마감 시각(18:10). 시각이 없으면 빈 값
   function arriveTime(text) {
     const m = String(text || "").match(/(\d{1,2}):(\d{2})/);
     if (!m) return "";
-    const min = parseInt(m[1], 10) * 60 + parseInt(m[2], 10) - 10;
-    return min < 0 ? "" : String(Math.floor(min / 60)).padStart(2, "0") + ":" + String(min % 60).padStart(2, "0");
+    const min = parseInt(m[1], 10) * 60 + parseInt(m[2], 10) + 10;
+    return min >= 24 * 60 ? "" : String(Math.floor(min / 60)).padStart(2, "0") + ":" + String(min % 60).padStart(2, "0");
   }
   function smsVars(kind, person) {
     const v = { 이름: person ? person.name : "홍길동", 링크: entryUrl() };
@@ -335,15 +329,14 @@
     if (kind === "join") v.일시 = S.sms.when.trim() || fmtWhen(S.round);
     if (kind === "confirm") {
       v.일시 = S.sms.when.trim() || fmtWhen(S.round); v.장소 = S.sms.venue.trim(); v.지도 = S.sms.map.trim();
-      v.도착시간 = arriveTime(v.일시);   // 시작 시간 10분 전. 일시에 시간이 없으면 비어서 그 줄이 빠진다
+      v.도착시간 = arriveTime(v.일시);   // 시작 시각 10분 후. 일시에 시간이 없으면 비어서 그 줄이 빠진다
     }
-    if (kind === "cancel") { v.일시 = S.sms.when.trim() || fmtWhen(S.round); v.취소사유 = S.sms.reason.trim(); v.환불안내 = S.sms.refund.trim(); }
+    if (kind === "cancel") v.일시 = S.sms.when.trim() || fmtWhen(S.round);
     return v;
   }
   // 문자를 보내기 전에 꼭 채워야 하는 칸이 비었는지. 비어 있으면 안내 문구를, 아니면 ""
   function smsMissing(kind) {
     if (kind === "confirm" && (!S.sms.venue.trim() || !S.sms.map.trim())) return "장소와 지도 링크를 입력해 주세요";
-    if (kind === "cancel" && (!S.sms.reason.trim() || !S.sms.refund.trim())) return "취소 사유와 환불·이월 안내를 입력해 주세요";
     return "";
   }
   const smsRest = (kind, d) => {
@@ -369,75 +362,62 @@
     if (mark) mark.disabled = !canSend;
   }
   const smsPrefLabel = (d) => fmtMD(d) + (d.slice(11) ? " " + d.slice(11) : "");
+  // 목록: 맨 위에 '보이는 사람 전체 선택' 체크박스, 아래에 사람별 체크박스
   function smsRowsHtml() {
     const kind = S.sms.kind, vis = smsVisible();
     if (!S.sms.list.length) return `<p class="sub">${kind === "result" && !(S.data && S.data.results_open) ? "결과를 공개하면 목록이 나와요." : "보낼 수 있는 사람이 없어요."}</p>`;
-    if (!vis.length) return `<p class="sub">조건에 맞는 사람이 없어요. 필터를 바꿔 보세요.</p>`;
-    return `<div class="rows smslist">${vis.map((x) => `<label class="row apck-row"><input type="checkbox" data-sms-sel="${x.id}" ${S.sms.sel[kind + ":" + x.id] ? "checked" : ""} aria-label="${esc(x.name)} 선택"><span class="rm"><b>${x.number ? x.number + "번 " : ""}${esc(x.name)}</b> <span class="sub">${esc(fmtPhone(x.phone))}</span>${x.gender ? ` <span class="pg g-${x.gender}">${x.gender === "M" ? "남" : "여"}</span>` : ""}${kind === "cancel" ? ` <span class="sub">${x.src === "applicant" ? "신청자" : "참가자"}</span>` : ""}${kind === "reserve" && x.assigned_round ? ` <span class="sub">${esc(roundLabel(x.assigned_round))} 배정</span>` : ""}${kind === "reserve" && applPrefs(x).length ? ` <span class="sub">${esc(applPrefs(x).map(smsPrefLabel).join(", "))}</span>` : ""}</span>${x.sent ? `<span class="tag y">발송됨</span>` : `<span class="tag n">미발송</span>`}</label>`).join("")}</div>`;
+    if (!vis.length) return `<p class="sub">조건에 맞는 사람이 없어요.</p>`;
+    const nSel = smsSelIds().length;
+    return `<label class="row apck-row smsall"><input type="checkbox" data-sms-all ${nSel === vis.length ? "checked" : ""} aria-label="보이는 사람 전체 선택"><span class="rm"><b>전체 선택</b> <span class="sub">${nSel}명 선택 / ${vis.length}명</span></span></label>
+      <div class="rows smslist">${vis.map((x) => `<label class="row apck-row"><input type="checkbox" data-sms-sel="${x.id}" ${S.sms.sel[kind + ":" + x.id] ? "checked" : ""} aria-label="${esc(x.name)} 선택"><span class="rm"><b>${x.number ? x.number + "번 " : ""}${esc(x.name)}</b> <span class="sub">${esc(fmtPhone(x.phone))}${kind === "cancel" ? (x.src === "applicant" ? " · 신청자" : " · 참가자") : ""}${kind === "reserve" && applPrefs(x).length ? " · " + esc(applPrefs(x).map(smsPrefLabel).join(", ")) : ""}</span></span>${x.sent ? `<span class="tag y">발송됨</span>` : ""}</label>`).join("")}</div>`;
   }
-  function smsCountText() { return `${smsSelIds().length}명 선택 · 보이는 ${smsVisible().length}명 / 전체 ${S.sms.list.length}명`; }
-  // 검색·체크를 바꿀 때: 화면 전체를 다시 그리지 않고 목록과 숫자만 갱신한다(입력 칸의 포커스 유지)
+  // 체크·검색을 바꿀 때: 화면 전체를 다시 그리지 않고 목록과 버튼만 갱신한다(입력 칸의 포커스 유지)
   function updateSmsList() {
-    const box = document.getElementById("sms-listbox"), c = document.getElementById("sms-selcount");
+    const box = document.getElementById("sms-listbox");
     if (box) box.innerHTML = smsRowsHtml();
-    if (c) c.textContent = smsCountText();
     updateSmsButtons();
   }
+  // 필터는 최소한으로: 발송 상태(기본 미발송) + 검색. 신청 완료는 신청 날짜, 행사 취소는 참가자/신청자 구분을 더한다
   function smsFilterBar(kind) {
     const f = S.sms.f, opt = (v, label, cur) => `<option value="${v}" ${cur === v ? "selected" : ""}>${label}</option>`;
     let more = "";
     if (kind === "reserve") {
       const dates = Array.from(new Set(S.sms.list.flatMap((x) => applPrefs(x).map(roundDate)).filter(Boolean))).sort();
       const times = f.date && f.date !== "__none" ? Array.from(new Set(S.sms.list.flatMap((x) => applPrefs(x).filter((d) => roundDate(d) === f.date).map((d) => d.slice(11) || "__none")))).sort() : [];
-      more = `<label class="mp"><span>신청한 날짜</span><select id="sms-f-date">${opt("", "전체", f.date)}${dates.map((d) => opt(d, roundLabel(d), f.date)).join("")}${opt("__none", "날짜 없음", f.date)}</select></label>`
-        + (times.length ? `<label class="mp"><span>신청한 시간</span><select id="sms-f-time">${opt("", "전체 시간", f.time)}${times.map((t) => opt(t, t === "__none" ? "시간 없음" : t, f.time)).join("")}</select></label>` : "");
-      more += `<label class="mp"><span>배정</span><select id="sms-f-assigned">${opt("", "전체", f.assigned)}${opt("no", "아직 배정 안 됨", f.assigned)}${opt("yes", "참가자로 배정됨", f.assigned)}</select></label>`;
-    } else {
-      more = (kind === "cancel" ? `<label class="mp"><span>대상 구분</span><select id="sms-f-src">${opt("", "전체", f.src)}${opt("participant", "참가자", f.src)}${opt("applicant", "신청자(배정 전)", f.src)}</select></label>` : "") + `<label class="mp"><span>도착</span><select id="sms-f-arrived">${opt("", "전체", f.arrived)}${opt("yes", "도착한 사람", f.arrived)}${opt("no", "아직 안 온 사람", f.arrived)}</select></label>`;
+      more = `<label class="mp"><span>신청 날짜</span><select id="sms-f-date">${opt("", "전체", f.date)}${dates.map((d) => opt(d, roundLabel(d), f.date)).join("")}${opt("__none", "날짜 없음", f.date)}</select></label>`
+        + (times.length > 1 || (times.length === 1 && times[0] !== "__none") ? `<label class="mp"><span>시간</span><select id="sms-f-time">${opt("", "전체", f.time)}${times.map((t) => opt(t, t === "__none" ? "시간 없음" : t, f.time)).join("")}</select></label>` : "");
+    } else if (kind === "cancel") {
+      more = `<label class="mp"><span>대상</span><select id="sms-f-src">${opt("", "전체", f.src)}${opt("participant", "참가자", f.src)}${opt("applicant", "신청자", f.src)}</select></label>`;
     }
-    return `<div class="filters"><label class="mp"><span>성별</span><select id="sms-f-gender">${opt("", "전체", f.gender)}${opt("M", "남", f.gender)}${opt("F", "여", f.gender)}</select></label>
-      <label class="mp"><span>발송 상태</span><select id="sms-f-status">${opt("", "전체", f.status)}${opt("unsent", "미발송", f.status)}${opt("sent", "발송됨", f.status)}</select></label>${more}
-      <label class="mp"><span>이름·번호 검색</span><input id="sms-f-q" type="search" placeholder="이름 또는 번호 뒷자리" value="${esc(f.q)}"></label></div>`;
+    return `<div class="filters"><label class="mp"><span>발송 상태</span><select id="sms-f-status">${opt("unsent", "미발송", f.status)}${opt("", "전체", f.status)}${opt("sent", "발송됨", f.status)}</select></label>${more}
+      <label class="mp"><span>검색</span><input id="sms-f-q" type="text" autocomplete="off" placeholder="이름 또는 번호" value="${esc(f.q)}"></label></div>`;
   }
   function smsPanel(d) {
-    const last = S.sms.last, kind = S.sms.kind, tpl = smsTpl(kind);
-    const { canSend, label, st, open } = smsSendState(d);
-    const preview = renderTpl(tpl, smsVars(kind, null));
+    const kind = S.sms.kind, tpl = smsTpl(kind);
+    const { canSend, label } = smsSendState(d);
     const seg = SMS_KINDS.map(([k, lb]) => { const c = smsRest(k, d); return `<button type="button" data-act="sms-kind" data-v="${k}" class="${kind === k ? "on" : ""}">${lb}${c.unknown ? "" : ` <small>${c.sent}/${c.total}</small>`}</button>`; }).join("");
-    const fields = kind === "join" ? `<div class="filters"><label class="mp" for="sms-when"><span>일시 <small>비우면 회차 날짜로 채워요</small></span><input id="sms-when" type="text" placeholder="${esc((fmtWhen(S.round) || "11월 8일(일)") + " 18:00 - 20:00 처럼 적어도 돼요")}" value="${esc(S.sms.when)}"></label></div>`
-      : kind === "confirm" ? `<div class="filters"><label class="mp" for="sms-when"><span>일시 <small>비우면 회차 날짜로 채워요</small></span><input id="sms-when" type="text" placeholder="${esc((fmtWhen(S.round) || "11월 8일(일)") + " 18:00 - 20:00 처럼 적어도 돼요")}" value="${esc(S.sms.when)}"></label>
-        <label class="mp" for="sms-venue"><span>장소 *</span><input id="sms-venue" type="text" placeholder="예: 홍대 ○○ 공간" value="${esc(S.sms.venue)}"></label>
-        <label class="mp" for="sms-map"><span>지도 링크 *</span><input id="sms-map" type="url" placeholder="https://naver.me/…" value="${esc(S.sms.map)}"></label></div>
-        <p class="sub" style="font-size:12.5px">일시에 <b>18:00 - 20:00</b>처럼 시간을 적으면 <b>도착 시간(시작 10분 전)</b>이 자동으로 계산돼요.</p>`
-      : kind === "cancel" ? `<div class="filters"><label class="mp" for="sms-when"><span>일시 <small>비우면 회차 날짜로 채워요</small></span><input id="sms-when" type="text" placeholder="${esc(fmtWhen(S.round) || "11월 8일(일) 18:00")}" value="${esc(S.sms.when)}"></label>
-        <label class="mp" for="sms-reason"><span>취소 사유 *</span><input id="sms-reason" type="text" placeholder="예: 최소 인원 미달" value="${esc(S.sms.reason)}"></label>
-        <label class="mp" for="sms-refund"><span>환불·이월 안내 * <small>문자에 그대로 들어가요</small></span><textarea id="sms-refund" rows="3" placeholder="예: 입금해 주신 참가비는 영업일 3일 이내 전액 환불해 드릴게요.">${esc(S.sms.refund)}</textarea></label></div>
-        <p class="note">취소 사유와 환불 안내는 팀이 정한 내용을 그대로 적어 주세요. 비어 있으면 보낼 수 없어요.</p>` : "";
-    return `<section class="panel"><h2>안내 문자 <span class="sub">맥북 메시지 앱으로 보내요</span></h2>
+    const roundSel = kind !== "reserve" ? `<label class="mp" for="sms-round"><span>회차</span><select id="sms-round">${S.rounds.length ? S.rounds.map((r) => `<option value="${esc(r.id)}" ${r.id === S.round ? "selected" : ""}>${esc(roundLabel(r.id))} · 참가자 ${r.count}명</option>`).join("") : `<option value="">회차가 없어요</option>`}</select></label>` : "";
+    const when = kind === "join" || kind === "cancel" ? `<label class="mp" for="sms-when"><span>일시 <small>비우면 회차 날짜</small></span><input id="sms-when" type="text" placeholder="${esc(fmtWhen(S.round) || "11월 8일(일) 18:00 - 20:00")}" value="${esc(S.sms.when)}"></label>` : "";
+    const place = kind === "confirm" ? `<label class="mp" for="sms-when"><span>일시 <small>예: 11월 8일(일) 18:00 - 20:00 · 시작 10분 후가 도착 마감</small></span><input id="sms-when" type="text" placeholder="${esc(fmtWhen(S.round) || "11월 8일(일) 18:00 - 20:00")}" value="${esc(S.sms.when)}"></label>
+      <label class="mp" for="sms-venue"><span>장소 *</span><input id="sms-venue" type="text" placeholder="예: 홍대 ○○ 공간" value="${esc(S.sms.venue)}"></label>
+      <label class="mp" for="sms-map"><span>지도 링크 *</span><input id="sms-map" type="url" placeholder="https://naver.me/…" value="${esc(S.sms.map)}"></label>` : "";
+    return `<section class="panel smsflow"><h2>안내 문자</h2>
       <div class="seg smsseg" role="group" aria-label="문자 종류">${seg}</div>
-      <p class="sub" style="font-size:13px"><b>${SMS_STEP[kind]}</b> 보내요.${kind !== "reserve" && S.round ? ` 대상 회차 <b>${esc(roundLabel(S.round))}</b>.` : ""} 아래 목록은 기본으로 <b>미발송만</b> 보이고 모두 선택돼 있어요. 늦게 등록한 사람은 나중에 같은 화면에서 미발송만 골라 보내면 돼요.</p>
-      <p class="sum"><b>${st.sent}명</b> 발송 완료 <span class="sub">/ 대상 ${st.total}명${st.rest ? ` · 남은 ${st.rest}명` : ""}</span></p>
-      ${kind !== "reserve" ? `<label class="mp" for="sms-round"><span>회차 <small>이 회차 참가자${kind === "cancel" ? "와 이 회차 신청자" : ""}가 대상이에요</small></span><select id="sms-round">${S.rounds.length ? S.rounds.map((r) => `<option value="${esc(r.id)}" ${r.id === S.round ? "selected" : ""}>${esc(roundLabel(r.id))} · 참가자 ${r.count}명 · ${r.results_open ? "결과 공개" : "진행 중"}</option>`).join("") : `<option value="">회차가 없어요</option>`}</select></label>` : ""}
-      ${fields}
-      <label class="mp" for="sms-tpl"><span>문안 <small>{이름} {희망날짜} {일시} {장소} {지도} {도착시간} {링크} {취소사유} {환불안내} 를 쓸 수 있어요. 값이 없는 자리표시가 든 줄은 빠져요.</small></span><textarea id="sms-tpl" rows="9">${esc(tpl)}</textarea></label>
-      <details class="smsprev"><summary>미리 보기 (예시 값)</summary><pre id="sms-preview">${esc(preview)}</pre></details>
-      <button class="link" data-act="sms-tpl-reset" style="justify-self:start">이 문안을 기본 문구로 되돌리기</button>
-      <h3 class="sub-h">받는 사람 고르기 <span class="sub" id="sms-selcount">${smsCountText()}</span></h3>
+      <p class="sub" style="font-size:13px">${SMS_STEP[kind]}</p>
+      <div class="filters">${roundSel}${when}${place}</div>
       ${smsFilterBar(kind)}
-      <div class="filters"><button class="btn sm ghost" data-act="sms-sel" data-v="unsent">보이는 사람 중 미발송만 선택</button><button class="btn sm ghost" data-act="sms-sel" data-v="all">보이는 사람 모두 선택</button><button class="btn sm ghost" data-act="sms-sel" data-v="none">보이는 사람 선택 해제</button></div>
       <div id="sms-listbox">${smsRowsHtml()}</div>
-      <p class="note">필터로 가려진 사람은 보내지 않아요. 맥북에서 실행을 마친 뒤 <b>[발송 완료로 표시]</b>를 눌러야 기록돼요.</p>
-      <h3 class="sub-h">보내는 순서</h3>
-      <ol class="how"><li><b>테스트 스크립트</b>로 다른 사람 번호에 먼저 1건 보내 봅니다.</li><li>잘 오면 <b>발송 스크립트</b>를 받아 맥북의 <b>스크립트 편집기</b>로 열고 ▶ 실행합니다(한 명씩 5초 간격으로 나가요).</li><li>끝나면 <b>발송 완료로 표시</b>를 눌러 선택한 사람을 기록합니다(중복 발송 방지).</li></ol>
-      <div class="filters"><label class="mp" for="sms-test"><span>테스트 문자 받을 번호</span><input id="sms-test" type="tel" inputmode="numeric" placeholder="다른 사람 휴대폰 번호" value="${esc(S.sms.test)}"></label>
-        <button class="btn sm ghost" data-act="mac-test" ${S.busy ? "disabled" : ""}>테스트 스크립트 받기</button></div>
+      <details class="smsprev"><summary>문안 보기 · 수정</summary>
+        <label class="mp" for="sms-tpl"><span>문안 <small>{이름} {희망날짜} {일시} {장소} {지도} {도착시간} {링크} · 값이 없는 줄은 빠져요</small></span><textarea id="sms-tpl" rows="10">${esc(tpl)}</textarea></label>
+        <p class="sub" style="font-size:12.5px;margin:8px 0 4px">미리 보기 (예시)</p><pre id="sms-preview">${esc(renderTpl(tpl, smsVars(kind, null)))}</pre>
+        <button class="link" data-act="sms-tpl-reset" style="justify-self:start">기본 문구로 되돌리기</button></details>
       <button class="btn" data-act="mac-send" ${canSend ? "" : "disabled"}>${label}</button>
+      <p class="note">받은 파일을 맥북의 <b>스크립트 편집기</b>로 열어 ▶ 실행하세요. 끝나면 아래 버튼으로 기록하고, 파일은 삭제하세요.</p>
       <button class="btn ghost" data-act="mac-mark" ${canSend ? "" : "disabled"}>${S.confirm === "mark" ? "한 번 더 눌러 표시" : "발송 완료로 표시"}</button>
-      <p class="note">스크립트 파일에는 번호가 들어 있어요. 보낸 뒤에는 <b>파일을 삭제</b>하세요. 문안·일시·장소·취소 사유는 서버에 저장돼서 다른 기기(다른 팀원의 맥북)에서도 같게 나와요.</p>
-      ${kind === "result" ? `<details class="smsprev"><summary>솔라피로 자동 발송 (서비스 가입 시)</summary>
-        <div style="display:grid;gap:8px;margin-top:8px"><button class="btn sm ghost" data-act="sms-test" ${S.busy ? "disabled" : ""}>솔라피로 테스트 1건</button>
-          <button class="btn sm" data-act="sms-send" ${!open || S.busy || !st.rest ? "disabled" : ""}>${S.confirm === "sms" ? `한 번 더 눌러 ${st.rest}명에게 발송` : `솔라피로 결과 안내 문자 보내기 (${st.rest}명)`}</button></div></details>` : ""}
-      ${last ? `<p class="note">${last.test ? "테스트 문자를 보냈어요." : `이번에 ${last.sent}명에게 보냈어요${last.failed.length ? `, <b>실패 ${last.failed.length}명</b>` : ""}.`}</p>${last.failed.length ? `<ul class="texts">${last.failed.slice(0, 10).map((f) => `<li>${esc(maskPhone(f.to))} · ${esc(f.error)}</li>`).join("")}</ul>` : ""}` : ""}</section>`;
+      <details class="smsprev"><summary>테스트로 1건 먼저 보내기</summary>
+        <div class="filters"><label class="mp" for="sms-test"><span>받을 번호 <small>다른 사람 번호</small></span><input id="sms-test" type="tel" inputmode="numeric" placeholder="01012345678" value="${esc(S.sms.test)}"></label>
+          <button class="btn sm ghost" data-act="mac-test" ${S.busy ? "disabled" : ""}>테스트 스크립트 받기</button></div></details>
+    </section>`;
   }
   // [문자] 탭: 예약 확인은 날짜(회차)와 무관하게, 나머지는 위에서 고른 날짜(회차)의 참가자에게
   const tabSms = (d) => smsPanel(d || { results_open: false, participants: [] });
@@ -718,8 +698,7 @@
       if (S.confirm !== key) return askConfirm(key);
       run(async () => { await api.admin.threadDelete(S.pin, t.dataset.id); toast("실을 삭제했어요. 보낸 사람은 다시 보낼 수 있어요."); });
     },
-    "sms-kind": (t) => { smsFlushSave(); S.sms.kind = t.dataset.v; S.sms.last = null; S.confirm = ""; S.sms.list = []; S.sms.f = { gender: "", status: "unsent", q: "", date: "", time: "", arrived: "", assigned: "", src: "" }; render(); run(async () => {}); },
-    "sms-sel": (t) => { const v = t.dataset.v; smsVisible().forEach((x) => { S.sms.sel[S.sms.kind + ":" + x.id] = v === "all" ? true : v === "none" ? false : !x.sent; }); updateSmsList(); },
+    "sms-kind": (t) => { smsFlushSave(); S.sms.kind = t.dataset.v; S.sms.last = null; S.confirm = ""; S.sms.list = []; S.sms.f = { status: "unsent", q: "", date: "", time: "", src: "" }; render(); run(async () => {}); },
     "sms-tpl-reset": () => { S.sms.tpl[S.sms.kind] = ""; smsFlushSave(); toast("기본 문구로 되돌렸어요."); render(); },
     "mac-test": () => {
       const to = digits(S.sms.test), kind = S.sms.kind;
@@ -747,19 +726,6 @@
       const kind = S.sms.kind;
       run(async () => { const ids = smsSelIds(); if (!ids.length) return toast("표시할 사람을 선택해 주세요."); const n = await api.admin.smsMark(S.pin, S.round, kind, ids); toast(n + "명을 발송 완료로 표시했어요."); });
     },
-    "sms-test": () => {
-      const to = digits(S.sms.test);
-      if (!/^01\d{8,9}$/.test(to)) return toast("테스트 문자를 받을 휴대폰 번호를 정확히 입력해 주세요.");
-      run(async () => { S.sms.last = await api.admin.sendSms(S.pin, S.round, to); toast("테스트 문자를 보냈어요. 휴대폰을 확인해 주세요."); });
-    },
-    "sms-send": () => {
-      if (S.confirm !== "sms") return askConfirm("sms");
-      run(async () => {
-        const r = await api.admin.sendSms(S.pin, S.round, "");
-        S.sms.last = r;
-        toast(r.demo ? `체험 모드: 실제 문자는 나가지 않아요 (${r.sent}명 처리)` : `${r.sent}명에게 문자를 보냈어요${r.failed.length ? ` · 실패 ${r.failed.length}명` : ""}`);
-      });
-    },
     "paid-set": (t) => run(async () => { await api.admin.paidSet(S.pin, t.dataset.id, t.dataset.v); toast(t.dataset.v === "approved" ? "승인했어요. 참가자 화면에 바로 열려요." : t.dataset.v === "rejected" ? "거절했어요." : "대기로 되돌렸어요."); }),
     "csv-match": () => {
       const rows = [["남 번호", "남 이름", "여 번호", "여 이름"]];
@@ -781,8 +747,9 @@
     if (t.id === "ap-gender") { S.appl.gender = t.value; render(); return; }
     if (t.id === "ap-showdone") { S.appl.showAssigned = t.checked; render(); return; }
     if (t.id === "ap-target") { S.appl.target = t.value; render(); return; }
-    if (t.dataset && t.dataset.smsSel) { S.sms.sel[S.sms.kind + ":" + t.dataset.smsSel] = !!t.checked; updateSmsButtons(); const c = document.getElementById("sms-selcount"); if (c) c.textContent = smsCountText(); return; }
-    { const m = /^sms-f-(gender|status|arrived|date|time|assigned|src)$/.exec(t.id || ""); if (m) { S.sms.f[m[1]] = t.value; if (m[1] === "date") S.sms.f.time = ""; render(); return; } }
+    if (t.dataset && t.dataset.smsSel) { S.sms.sel[S.sms.kind + ":" + t.dataset.smsSel] = !!t.checked; updateSmsList(); return; }
+    if (t.dataset && t.dataset.smsAll !== undefined) { const on = !!t.checked; smsVisible().forEach((x) => { S.sms.sel[S.sms.kind + ":" + x.id] = on; }); updateSmsList(); return; }
+    { const m = /^sms-f-(status|date|time|src)$/.exec(t.id || ""); if (m) { S.sms.f[m[1]] = t.value; if (m[1] === "date") S.sms.f.time = ""; render(); return; } }
     if (t.dataset && t.dataset.applSel) { if (t.checked) S.appl.sel[t.dataset.applSel] = true; else delete S.appl.sel[t.dataset.applSel]; render(); return; }
     if (t.dataset && t.dataset.arrive) {   // 도착 체크: 화면은 바로 바꾸고 서버에 저장한다
       const p = S.data.participants.find((x) => x.id === t.dataset.arrive); if (!p) return;
@@ -808,8 +775,6 @@
     if (e.target.id === "sms-test") S.sms.test = e.target.value.replace(/\D/g, "").slice(0, 11);
     if (e.target.id === "sms-venue") { S.sms.venue = e.target.value; smsQueueSave(); updateSmsButtons(); }
     if (e.target.id === "sms-when") { S.sms.when = e.target.value; smsQueueSave(); updateSmsButtons(); }
-    if (e.target.id === "sms-reason") { S.sms.reason = e.target.value; smsQueueSave(); updateSmsButtons(); }
-    if (e.target.id === "sms-refund") { S.sms.refund = e.target.value; smsQueueSave(); updateSmsButtons(); }
     if (e.target.id === "sms-f-q") { S.sms.f.q = e.target.value; updateSmsList(); }
     if (e.target.id === "sms-map") { S.sms.map = e.target.value; smsQueueSave(); updateSmsButtons(); }
     if (e.target.id === "sms-tpl") { smsSaveTpl(S.sms.kind, e.target.value); updateSmsButtons(); }
