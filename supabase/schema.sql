@@ -818,44 +818,127 @@ begin
   return public.admin_assign(p_pin, p_ids, p_round, p_label);
 end $$;
 
--- 신청자를 삭제한다. 이미 배정된 신청자라면 그 회차의 참가자도 함께 지운다(신청 기록까지 모두 삭제).
+-- ───────────────────────── 휴지통 ─────────────────────────
+-- 삭제한 신청자·참가자를 7일 동안 보관해 복원할 수 있게 한다(개인정보라 7일이 지나면 자동으로 영구 삭제).
+-- 복원되는 것: 신청 기록, 참가자(회차·번호·기본 정보). 복원되지 않는 것: 메모·최종 선택·설문·로그인 기록.
+create table if not exists public.trash (
+  id          uuid primary key default gen_random_uuid(),
+  name        text not null,
+  phone       text not null,
+  gender      text,
+  round_id    text,
+  number      int,
+  applicant   jsonb,
+  participant jsonb,
+  deleted_at  timestamptz not null default now()
+);
+alter table public.trash enable row level security;
+
+create or replace function public._trash_put(a public.applicants, x public.participants)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  if a.id is null and x.id is null then return; end if;
+  insert into public.trash (name, phone, gender, round_id, number, applicant, participant)
+  values (coalesce(a.name, x.name), coalesce(a.phone, x.phone), coalesce(a.gender, x.gender), x.round_id, x.number,
+          case when a.id is null then null else to_jsonb(a) end, case when x.id is null then null else to_jsonb(x) end);
+end $$;
+revoke execute on function public._trash_put(public.applicants, public.participants) from public, anon, authenticated;
+
+-- 신청자를 삭제한다(휴지통으로). 이미 배정된 신청자라면 그 회차의 참가자도 함께 지운다.
 create or replace function public.admin_applicant_remove(p_pin text, p_id uuid)
 returns void language plpgsql security definer set search_path = public as $$
-declare a public.applicants;
+declare a public.applicants; x public.participants;
 begin
   perform public._check_admin(p_pin);
   select * into a from public.applicants where id = p_id;
   if a.id is null then return; end if;
-  if a.assigned_round is not null then delete from public.participants where round_id = a.assigned_round and phone = a.phone; end if;
+  if a.assigned_round is not null then select * into x from public.participants where round_id = a.assigned_round and phone = a.phone; end if;
+  perform public._trash_put(a, x);
+  if x.id is not null then delete from public.participants where id = x.id; end if;
   delete from public.sms_log where applicant_id = p_id;
   delete from public.applicants where id = p_id;
 end $$;
 
--- 여러 신청자를 한꺼번에 삭제한다(배정된 사람은 참가자도 함께). 삭제한 신청자 수를 돌려준다.
+-- 여러 신청자를 한꺼번에 삭제한다(휴지통으로, 배정된 사람은 참가자도 함께). 삭제한 신청자 수를 돌려준다.
 create or replace function public.admin_applicant_remove_many(p_pin text, p_ids uuid[])
 returns int language plpgsql security definer set search_path = public as $$
-declare n int;
+declare i uuid; n int := 0;
 begin
   perform public._check_admin(p_pin);
-  delete from public.participants p using public.applicants a
-   where a.id = any(coalesce(p_ids, '{}'::uuid[])) and a.assigned_round is not null and p.round_id = a.assigned_round and p.phone = a.phone;
-  delete from public.sms_log where applicant_id = any(coalesce(p_ids, '{}'::uuid[]));
-  delete from public.applicants where id = any(coalesce(p_ids, '{}'::uuid[]));
-  get diagnostics n = row_count;
+  foreach i in array coalesce(p_ids, '{}'::uuid[]) loop
+    if exists (select 1 from public.applicants where id = i) then
+      perform public.admin_applicant_remove(p_pin, i);
+      n := n + 1;
+    end if;
+  end loop;
   return n;
 end $$;
 
--- 참가자를 삭제한다(신청 기록까지 모두). 신청자 대기 명단으로 되돌리려면 admin_remove(배정 취소)를 쓴다.
+-- 참가자를 삭제한다(휴지통으로, 신청 기록까지). 신청자 대기 명단으로 되돌리려면 admin_remove(배정 취소)를 쓴다.
 create or replace function public.admin_remove_full(p_pin text, p_id uuid)
 returns void language plpgsql security definer set search_path = public as $$
-declare x public.participants;
+declare x public.participants; a public.applicants;
 begin
   perform public._check_admin(p_pin);
   select * into x from public.participants where id = p_id;
   if x.id is null then return; end if;
-  delete from public.sms_log where applicant_id in (select id from public.applicants where phone = x.phone and assigned_round = x.round_id);
-  delete from public.applicants where phone = x.phone and assigned_round = x.round_id;
+  select * into a from public.applicants where phone = x.phone and assigned_round = x.round_id;
+  perform public._trash_put(a, x);
+  if a.id is not null then
+    delete from public.sms_log where applicant_id = a.id;
+    delete from public.applicants where id = a.id;
+  end if;
   delete from public.participants where id = p_id;
+end $$;
+
+-- 휴지통 목록(7일 지난 것은 이 때 영구 삭제)
+create or replace function public.admin_trash(p_pin text)
+returns jsonb language plpgsql security definer set search_path = public as $$
+begin
+  perform public._check_admin(p_pin);
+  delete from public.trash where deleted_at < now() - interval '7 days';
+  return coalesce((select jsonb_agg(jsonb_build_object('id', t.id, 'name', t.name, 'phone', t.phone, 'gender', t.gender, 'round_id', t.round_id, 'number', t.number,
+           'kind', case when t.participant is not null then 'participant' else 'applicant' end, 'deleted_at', t.deleted_at) order by t.deleted_at desc)
+    from public.trash t), '[]'::jsonb);
+end $$;
+
+-- 휴지통에서 복원한다. 같은 연락처가 이미 있으면 복원하지 않는다.
+create or replace function public.admin_trash_restore(p_pin text, p_id uuid)
+returns void language plpgsql security definer set search_path = public as $$
+declare t public.trash; a jsonb; x jsonb; num int; rnd text;
+begin
+  perform public._check_admin(p_pin);
+  select * into t from public.trash where id = p_id;
+  if t.id is null then raise exception 'not_found'; end if;
+  a := t.applicant; x := t.participant;
+  if a is not null and exists (select 1 from public.applicants where phone = a->>'phone') then raise exception 'already_exists'; end if;
+  if x is not null and exists (select 1 from public.participants where round_id = x->>'round_id' and phone = x->>'phone') then raise exception 'already_exists'; end if;
+  if x is not null then
+    rnd := x->>'round_id'; num := (x->>'number')::int;
+    -- 원래 번호를 다른 사람이 쓰고 있으면 비어 있는 번호로 붙인다
+    if exists (select 1 from public.participants where round_id = rnd and gender = x->>'gender' and number = num) then num := null; end if;
+    perform public.admin_import(p_pin, rnd, rnd, jsonb_build_array(jsonb_build_object(
+      'phone', x->>'phone', 'gender', x->>'gender', 'name', x->>'name', 'age_label', x->>'age_label', 'school', x->>'school',
+      'mbti', x->>'mbti', 'hobby', x->>'hobby', 'number', num)), false);
+  end if;
+  if a is not null then
+    insert into public.applicants (phone, gender, name, age_label, school, mbti, hobby, pref_date, pref_dates, photo_url, assigned_round, created_at)
+    values (a->>'phone', a->>'gender', a->>'name', a->>'age_label', a->>'school', a->>'mbti', a->>'hobby', a->>'pref_date',
+            coalesce((select array_agg(v) from jsonb_array_elements_text(case when jsonb_typeof(a->'pref_dates') = 'array' then a->'pref_dates' else '[]'::jsonb end) v), '{}'::text[]),
+            a->>'photo_url', case when x is not null then x->>'round_id' else null end, coalesce((a->>'created_at')::timestamptz, now()));
+  end if;
+  delete from public.trash where id = p_id;
+end $$;
+
+-- 휴지통을 영구 삭제한다. p_ids 가 비어 있으면 휴지통 전체를 비운다.
+create or replace function public.admin_trash_purge(p_pin text, p_ids uuid[] default null)
+returns int language plpgsql security definer set search_path = public as $$
+declare n int;
+begin
+  perform public._check_admin(p_pin);
+  if p_ids is null then delete from public.trash; else delete from public.trash where id = any(p_ids); end if;
+  get diagnostics n = row_count;
+  return n;
 end $$;
 
 

@@ -9,6 +9,7 @@
   const S = { pin: "", data: null, paid: [], thr: [], applicants: [], appl: { date: "", time: "", gender: "", showAssigned: false, sel: {}, target: "", newdate: "", newtime: "" }, error: "", confirm: "", busy: false, round: "", rounds: [], tab: "picks", open: {}, openPick: {}, pickEdit: {}, onlyBad: false, onlyAbsent: false, sms: { test: "", last: null, kind: "reserve", venue: "", map: "", when: "", counts: null, tpl: {}, list: [], sel: {}, wasSent: {}, dbOk: true, f: { status: "unsent", q: "", date: "", time: "", src: "" } },
     add: { open: false, editing: false, round: "", newdate: "", newtime: "", name: "", gender: "", phone: "", number: "", age: "", school: "", mbti: "", hobby: "" },
   };
+  S.trash = [];
   S.lastAssign = null;
   try { S.lastAssign = JSON.parse(sessionStorage.getItem("rn_admin_lastassign") || "null"); } catch (e) { S.lastAssign = null; }
   try { S.pin = sessionStorage.getItem("rn_admin_pin") || ""; S.round = sessionStorage.getItem("rn_admin_round") || ""; S.tab = sessionStorage.getItem("rn_admin_tab") || "applicants"; } catch (e) { /* 저장소 사용 불가 */ }
@@ -33,6 +34,7 @@
     S.thr = S.round ? await api.admin.threads(S.pin, S.round) : [];
     try { S.sms.counts = await api.admin.smsCounts(S.pin, S.round); } catch (e) { S.sms.counts = null; }   // SQL 을 아직 안 돌렸으면 숫자만 못 보여준다
     await loadSms();
+    try { S.trash = await api.admin.trash(S.pin); } catch (e) { S.trash = []; }   // SQL 을 아직 안 돌렸으면 휴지통만 비어 보인다
     S.data = S.round ? await api.admin.dashboard(S.pin, S.round) : { round: null, results_open: false, participants: [], matches: [], surveys: [] };
     try { sessionStorage.setItem("rn_admin_round", S.round); sessionStorage.setItem("rn_admin_tab", S.tab); } catch (e) { /* 무시 */ }
   }
@@ -172,7 +174,7 @@
             <button class="ptog" data-act="toggle" data-id="${p.id}" aria-expanded="${open}" aria-label="${esc(p.name)} 자세히 ${open ? "접기" : "보기"}">${chev}</button></div>
           ${open ? `<dl class="pdet">${rows}<div><dt>설문</dt><dd><span class="tag ${p.submitted ? "y" : "n"}">${p.submitted ? "제출" : "대기"}</span></dd></div>
             <div class="pact"><label>번호 <input class="numin" type="number" min="1" inputmode="numeric" data-id="${p.id}" data-old="${p.number}" value="${p.number}" aria-label="${esc(p.name)} 번호"></label>
-              <span class="pbtns">${p.has_pin ? `<button class="link" data-act="reset-pin" data-phone="${esc(p.phone)}" data-name="${esc(p.name)}">${S.confirm === "rp" + p.phone ? "정말 초기화" : "비밀번호 초기화"}</button>` : `<span class="sub" style="font-size:12px">비밀번호 미설정</span>`}<button class="link" data-act="edit-person" data-id="${p.id}">정보 수정</button>${S.applicants.some((a) => a.phone === p.phone && a.assigned_round === S.round) ? `<button class="link" data-act="remove" data-id="${p.id}" data-name="${esc(p.name)}" title="신청자 대기 명단으로 되돌려요">${S.confirm === "rm" + p.id ? "한 번 더 눌러 취소" : "배정 취소"}</button>` : ""}<button class="link" data-act="remove-full" data-id="${p.id}" data-name="${esc(p.name)}" title="신청 기록까지 모두 삭제해요">${S.confirm === "rf" + p.id ? "한 번 더 눌러 삭제" : "삭제"}</button></span></div></dl>` : ""}
+              <span class="pbtns">${p.has_pin ? `<button class="link" data-act="reset-pin" data-phone="${esc(p.phone)}" data-name="${esc(p.name)}">${S.confirm === "rp" + p.phone ? "정말 초기화" : "비밀번호 초기화"}</button>` : `<span class="sub" style="font-size:12px">비밀번호 미설정</span>`}<button class="link" data-act="edit-person" data-id="${p.id}">정보 수정</button>${S.applicants.some((a) => a.phone === p.phone && a.assigned_round === S.round) ? `<button class="link" data-act="remove" data-id="${p.id}" data-name="${esc(p.name)}" title="신청자 대기 명단으로 되돌려요">${S.confirm === "rm" + p.id ? "한 번 더 눌러 취소" : "배정 취소"}</button>` : ""}<button class="link" data-act="remove-full" data-id="${p.id}" data-name="${esc(p.name)}" title="휴지통으로 보내요(7일간 복원 가능)">${S.confirm === "rf" + p.id ? "한 번 더 눌러 삭제" : "삭제"}</button></span></div></dl>` : ""}
         </div>`;
       }).join("")}</div>`;
   }
@@ -486,6 +488,18 @@
   }
 
 
+  // 휴지통: 삭제한 신청자·참가자를 7일간 보관. 비어 있으면 아무것도 보이지 않는다
+  function trashPanel() {
+    const list = S.trash || [];
+    if (!list.length) return "";
+    const when = (iso) => { const d = new Date(iso); return isNaN(d) ? "" : (d.getMonth() + 1) + "/" + d.getDate() + " " + String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0"); };
+    return `<details class="panel trashbox" ${S.open.trash ? "open" : ""}><summary><b>휴지통</b> ${list.length}명</summary>
+      <p class="note">삭제한 신청자·참가자를 <b>7일 동안</b> 보관해요. 복원해도 메모·최종 선택·설문 기록은 돌아오지 않아요.</p>
+      <div class="rows">${list.map((t) => `<div class="row paidrow"><span class="rm"><b>${esc(t.name)}</b> <small>${t.kind === "participant" ? esc(roundLabel(t.round_id)) + " · " + t.number + "번 · 참가자" : "신청자"} · ${esc(fmtPhone(t.phone))} · ${esc(when(t.deleted_at))} 삭제</small></span>
+        <span class="pbtns"><button class="btn sm" data-act="trash-restore" data-id="${t.id}" data-name="${esc(t.name)}" ${S.busy ? "disabled" : ""}>복원</button><button class="link" data-act="trash-purge" data-id="${t.id}">${S.confirm === "tp" + t.id ? "한 번 더 눌러 영구 삭제" : "영구 삭제"}</button></span></div>`).join("")}</div>
+      <button class="link" data-act="trash-empty" style="justify-self:start;margin-top:6px">${S.confirm === "te" ? "한 번 더 눌러 비우기" : "휴지통 비우기"}</button></details>`;
+  }
+
   /* ───────── [신청자] 대기 명단 → 날짜 배정 ───────── */
   const applKnownRounds = () => S.rounds.filter((r) => r.count > 0 || r.id === S.round);
   function applTarget() {
@@ -526,7 +540,7 @@
           <button class="ptog" data-act="toggle" data-id="ap${x.id}" aria-expanded="${open}" aria-label="${esc(x.name)} 자세히 ${open ? "접기" : "보기"}">${chev}</button></div>
         ${open ? `<dl class="pdet">${det}<div><dt>연락처</dt><dd>${esc(fmtPhone(x.phone))}</dd></div>
           <div class="pact"><span>${x.photo_url ? `<a class="link" href="${esc(x.photo_url)}" target="_blank" rel="noopener noreferrer">사진 보기 ↗</a>` : `<span class="sub">사진 링크 없음</span>`}</span>
-            <span class="pbtns">${done ? `<button class="link" data-act="appl-unassign" data-id="${x.id}" data-name="${esc(x.name)}" title="대기 명단으로 되돌려요">${S.confirm === "un" + x.id ? "한 번 더 눌러 취소" : "배정 취소"}</button>` : ""}<button class="link" data-act="appl-remove" data-id="${x.id}" data-name="${esc(x.name)}" title="신청 기록까지 모두 삭제해요">${S.confirm === "ar" + x.id ? "한 번 더 눌러 삭제" : "삭제"}</button></span></div></dl>` : ""}
+            <span class="pbtns">${done ? `<button class="link" data-act="appl-unassign" data-id="${x.id}" data-name="${esc(x.name)}" title="대기 명단으로 되돌려요">${S.confirm === "un" + x.id ? "한 번 더 눌러 취소" : "배정 취소"}</button>` : ""}<button class="link" data-act="appl-remove" data-id="${x.id}" data-name="${esc(x.name)}" title="휴지통으로 보내요(7일간 복원 가능)">${S.confirm === "ar" + x.id ? "한 번 더 눌러 삭제" : "삭제"}</button></span></div></dl>` : ""}
       </div>`;
     }).join("");
     const lastBar = S.lastAssign ? `<div class="undobar ok"><span>방금 <b>${esc(roundLabel(S.lastAssign.rid))}</b>에 <b>${S.lastAssign.n}명</b>을 배정했어요.</span><span class="pbtns"><button class="btn sm" data-act="appl-undo-last" ${S.busy ? "disabled" : ""}>${S.confirm === "undo" ? "한 번 더 눌러 되돌리기" : "되돌리기"}</button><button class="link" data-act="appl-undo-dismiss">닫기</button></span></div>` : "";
@@ -567,12 +581,12 @@
     const tab = TABS.some((t) => t[0] === S.tab) && (rnd || noRoundTabs.includes(S.tab)) ? S.tab : "people", badCount = (d.picks || []).filter((x) => !x.target_id).length;
     const nav = `<nav class="tabs" aria-label="진행자 메뉴">${TABS.map(([id, label, icon]) => `<button data-act="tab" data-v="${id}" class="${tab === id ? "on" : ""}" ${tab === id ? 'aria-current="page"' : ""} ${!rnd && id !== "people" && !noRoundTabs.includes(id) ? "disabled" : ""}><span class="ico">${icon}</span>${label}${id === "picks" && badCount + S.paid.filter((q) => q.status === "pending").length ? `<em class="bdg" aria-label="확인 필요 ${badCount + S.paid.filter((q) => q.status === "pending").length}건">${badCount + S.paid.filter((q) => q.status === "pending").length}</em>` : ""}</button>`).join("")}</nav>`;
     let body;
-    if (tab === "applicants") body = tabApplicants();
+    if (tab === "applicants") body = tabApplicants() + trashPanel();
     else if (tab === "sms") body = tabSms(rnd ? d : null);
-    else if (!rnd) body = `<div class="empty"><b>아직 날짜(회차)가 없어요</b><p>신청자 탭에서 날짜에 배정하거나, 아래에서 참가자를 직접 추가하면 그 날짜 회차가 만들어져요.</p></div>${addPanel()}${entryPanel()}`;
+    else if (!rnd) body = `<div class="empty"><b>아직 날짜(회차)가 없어요</b><p>신청자 탭에서 날짜에 배정하거나, 아래에서 참가자를 직접 추가하면 그 날짜 회차가 만들어져요.</p></div>${addPanel()}${trashPanel()}${entryPanel()}`;
     else if (tab === "picks") body = tabPicks(d, rnd);
     else if (tab === "survey") body = tabSurvey(d, rnd);
-    else body = `${tabPeople(d, rnd)}${addPanel()}${entryPanel()}`;   // 참가자 탭: 현황 + 직접 추가 + 입장 링크
+    else body = `${tabPeople(d, rnd)}${addPanel()}${trashPanel()}${entryPanel()}`;   // 참가자 탭: 현황 + 직접 추가 + 입장 링크
     return `${head}${roundBar()}<main class="wrap wide admin-main">${body}</main>${nav}`;
   }
 
@@ -635,6 +649,16 @@
       const key = "rp" + t.dataset.phone;
       if (S.confirm !== key) return askConfirm(key);
       run(async () => { await api.admin.resetPin(S.pin, t.dataset.phone); toast(t.dataset.name + " 님의 비밀번호를 초기화했어요. 다음 입장 때 다시 정해요."); });
+    },
+    "trash-restore": (t) => run(async () => { await api.admin.trashRestore(S.pin, t.dataset.id); toast(t.dataset.name + " 님을 복원했어요."); }),
+    "trash-purge": (t) => {
+      const key = "tp" + t.dataset.id;
+      if (S.confirm !== key) return askConfirm(key);
+      run(async () => { await api.admin.trashPurge(S.pin, [t.dataset.id]); toast("영구 삭제했어요."); });
+    },
+    "trash-empty": () => {
+      if (S.confirm !== "te") return askConfirm("te");
+      run(async () => { const n = await api.admin.trashPurge(S.pin, null); toast("휴지통을 비웠어요 (" + n + "명)."); });
     },
     "remove-full": (t) => {
       const key = "rf" + t.dataset.id;
@@ -825,6 +849,7 @@
       run(async () => { await api.admin.setNumber(S.pin, t.dataset.id, n); toast("번호를 " + n + "번으로 바꿨어요."); });
     }
   });
+  document.addEventListener("toggle", (e) => { if (e.target && e.target.classList && e.target.classList.contains("trashbox")) S.open.trash = e.target.open; }, true);
   document.addEventListener("input", (e) => {
     if (e.target.id === "sms-test") S.sms.test = e.target.value.replace(/\D/g, "").slice(0, 11);
     if (e.target.id === "sms-venue") { S.sms.venue = e.target.value; smsQueueSave(); updateSmsButtons(); }

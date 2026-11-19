@@ -36,6 +36,7 @@
     invalid_pin: "비밀번호는 숫자 4자리예요.",
     pin_exists: "이미 비밀번호가 정해진 번호예요. 비밀번호를 입력해 주세요.",
     pin_not_set: "먼저 비밀번호를 정해 주세요.",
+    already_exists: "같은 연락처가 이미 있어서 복원할 수 없어요.",
     results_not_open: "먼저 매칭 결과를 공개해 주세요. 공개한 뒤에 문자를 보낼 수 있어요.",
     not_configured: "문자 서비스 설정이 아직 안 되어 있어요. (서버에 발송 키·발신번호가 없어요)",
     bad_number: "문자를 받을 번호를 정확히 입력해 주세요.",
@@ -193,6 +194,9 @@
         setPicks: (pin, participantId, targetIds) => rpc("admin_set_picks", { p_pin: pin, p_participant: participantId, p_targets: targetIds }),
         remove: (pin, id) => rpc("admin_remove", { p_pin: pin, p_id: id }),
         removeFull: (pin, id) => rpc("admin_remove_full", { p_pin: pin, p_id: id }),
+        trash: (pin) => rpc("admin_trash", { p_pin: pin }),
+        trashRestore: (pin, id) => rpc("admin_trash_restore", { p_pin: pin, p_id: id }),
+        trashPurge: (pin, ids) => rpc("admin_trash_purge", { p_pin: pin, p_ids: Array.isArray(ids) && ids.length ? ids : null }),
         // 결과 안내 문자: Supabase Edge Function(send-result-sms)을 부른다. testTo 가 있으면 그 번호로만 시험 발송한다.
         async sendSms(pin, round, testTo) {
           const url = String(cfg.supabaseUrl).replace(/\/+$/, "") + "/functions/v1/send-result-sms";
@@ -568,9 +572,33 @@
           s.people = s.people.filter((u) => u.id !== id); s.threads = (s.threads || []).filter((t) => t.from !== id && t.to !== id); delete s.picks[id]; delete s.surveys[id]; delete s.notes[id];
           if (s.session === id) s.session = null;
         }),
+        trash: (pin) => op((s) => {
+          checkAdmin(pin);
+          const lim = Date.now() - 7 * 86400000;
+          s.trash = (s.trash || []).filter((t) => new Date(t.deleted_at).getTime() >= lim);
+          return s.trash.map((t) => ({ id: t.id, name: t.name, phone: t.phone, gender: t.gender, round_id: t.round_id, number: t.number, kind: t.participant ? "participant" : "applicant", deleted_at: t.deleted_at })).reverse();
+        }),
+        trashPurge: (pin, ids) => op((s) => { checkAdmin(pin); const before = (s.trash || []).length; s.trash = Array.isArray(ids) && ids.length ? (s.trash || []).filter((t) => !ids.includes(t.id)) : []; return before - s.trash.length; }),
+        trashRestore: (pin, id) => op((s) => {
+          checkAdmin(pin);
+          const t = (s.trash || []).find((x) => x.id === id);
+          if (!t) fail("not_found");
+          if (t.applicant && (s.applicants || []).some((a) => a.phone === t.applicant.phone)) fail("already_exists");
+          if (t.participant && s.people.some((p) => p.round === t.participant.round && p.phone === t.participant.phone)) fail("already_exists");
+          if (t.participant) {
+            const x = t.participant, taken = s.people.some((p) => p.round === x.round && p.gender === x.gender && p.number === x.number);
+            let n = x.number;
+            if (taken) { const used = new Set(s.people.filter((p) => p.round === x.round && p.gender === x.gender).map((p) => p.number)); n = 1; while (used.has(n)) n++; }
+            if (!s.rounds[x.round]) s.rounds[x.round] = { label: x.round, results_open: false };
+            s.people.push(Object.assign({}, x, { id: "p" + s.seq++, number: n }));
+          }
+          if (t.applicant) { s.applicants = s.applicants || []; s.applicants.push(Object.assign({}, t.applicant, { id: "a" + s.seq++, assigned_round: t.participant ? t.participant.round : null })); }
+          s.trash = s.trash.filter((x) => x.id !== id);
+        }),
         removeFull: (pin, id) => op((s) => {
           checkAdmin(pin);
           const gp = s.people.find((u) => u.id === id);
+          if (gp) { const ap = (s.applicants || []).find((a) => a.phone === gp.phone && a.assigned_round === gp.round); demoTrash(s, ap, gp); }
           if (gp) s.applicants = (s.applicants || []).filter((a) => !(a.phone === gp.phone && a.assigned_round === gp.round));
           s.people = s.people.filter((u) => u.id !== id); s.threads = (s.threads || []).filter((t) => t.from !== id && t.to !== id); delete s.picks[id]; delete s.surveys[id]; delete s.notes[id];
           if (s.session === id) s.session = null;
@@ -651,12 +679,14 @@
         applicantRemove: (pin, id) => op((s) => {
           checkAdmin(pin);
           const a = (s.applicants || []).find((x) => x.id === id);
+          if (a) demoTrash(s, a, a.assigned_round ? s.people.find((u) => u.round === a.assigned_round && u.phone === a.phone) : null);
           if (a && a.assigned_round) { const gp = s.people.find((u) => u.round === a.assigned_round && u.phone === a.phone); if (gp) { s.people = s.people.filter((u) => u.id !== gp.id); delete s.picks[gp.id]; delete s.surveys[gp.id]; delete s.notes[gp.id]; if (s.session === gp.id) s.session = null; } }
           s.applicants = (s.applicants || []).filter((x) => x.id !== id);
         }),
         applicantRemoveMany: (pin, ids) => op((s) => {
           checkAdmin(pin);
           const before = (s.applicants || []).length;
+          (s.applicants || []).filter((a) => (ids || []).includes(a.id)).forEach((a) => demoTrash(s, a, a.assigned_round ? s.people.find((u) => u.round === a.assigned_round && u.phone === a.phone) : null));
           (s.applicants || []).filter((a) => (ids || []).includes(a.id) && a.assigned_round).forEach((a) => {
             const gp = s.people.find((u) => u.round === a.assigned_round && u.phone === a.phone);
             if (gp) { s.people = s.people.filter((u) => u.id !== gp.id); delete s.picks[gp.id]; delete s.surveys[gp.id]; delete s.notes[gp.id]; if (s.session === gp.id) s.session = null; }
@@ -706,6 +736,13 @@
 
   window.api = isDemo ? demoApi() : liveApi();
   // 신청자의 희망 날짜·시간 목록(예전 데이터는 pref_date 하나만 있다)
+  // 체험 모드의 휴지통: 삭제한 신청자·참가자를 7일간 보관
+  const demoTrash = (s, a, x) => {
+    if (!a && !x) return;
+    s.trash = s.trash || [];
+    s.trash.push({ id: "t" + s.seq++, name: (a || x).name, phone: (a || x).phone, gender: (a || x).gender, round_id: x ? x.round : null, number: x ? x.number : null,
+      applicant: a ? JSON.parse(JSON.stringify(a)) : null, participant: x ? JSON.parse(JSON.stringify(x)) : null, deleted_at: new Date().toISOString() });
+  };
   const prefHits = (prefs, round) => prefs.some((d) => String(d).slice(0, 10) === String(round).slice(0, 10) && (String(round).length === 10 || String(d).length === 10 || d === round));
   const applPrefs = (a) => (a && Array.isArray(a.pref_dates) && a.pref_dates.length ? a.pref_dates : a && a.pref_date ? [a.pref_date] : []);
   window.RN = { applPrefs, SURVEY, MAX_PICKS, MEMO_SLOTS, roundLabel, roundTag, roundDate, mkRound, isRoundId, toRoundId, dateChoices, todayISO, friendly, digits, normPhone, fmtPhone, splitSchool, splitHobby };
