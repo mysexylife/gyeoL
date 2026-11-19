@@ -9,7 +9,7 @@
   const S = { pin: "", data: null, paid: [], thr: [], applicants: [], appl: { date: "", time: "", gender: "", showAssigned: false, sel: {}, target: "", newdate: "", newtime: "" }, error: "", confirm: "", busy: false, round: "", rounds: [], tab: "picks", open: {}, openPick: {}, pickEdit: {}, onlyBad: false, onlyAbsent: false, sms: { test: "", last: null, kind: "reserve", venue: "", map: "", when: "", counts: null, tpl: {}, list: [], sel: {}, wasSent: {}, dbOk: true, reason: "", refund: "", f: { gender: "", status: "unsent", q: "", date: "", time: "", arrived: "", assigned: "", src: "" } },
     add: { open: false, editing: false, round: "", newdate: "", newtime: "", name: "", gender: "", phone: "", number: "", age: "", school: "", mbti: "", hobby: "" },
   };
-  try { S.pin = sessionStorage.getItem("rn_admin_pin") || ""; S.round = sessionStorage.getItem("rn_admin_round") || ""; S.tab = sessionStorage.getItem("rn_admin_tab") || "picks"; } catch (e) { /* 저장소 사용 불가 */ }
+  try { S.pin = sessionStorage.getItem("rn_admin_pin") || ""; S.round = sessionStorage.getItem("rn_admin_round") || ""; S.tab = sessionStorage.getItem("rn_admin_tab") || "applicants"; } catch (e) { /* 저장소 사용 불가 */ }
 
   let toastTimer;
   function toast(msg) {
@@ -227,9 +227,9 @@
   /* ───────── 하단 탭 4개: 최종 선택 현황 · 참가자 현황 · 참가자 추가 · 설문 결과 ───────── */
   const ico = (inner) => `<svg viewBox="0 0 24 24" aria-hidden="true">${inner}</svg>`;
   const TABS = [
-    ["people", "참가자", ico('<circle cx="9" cy="8.5" r="3"/><path d="M3.5 19c.5-3 2.7-4.8 5.5-4.8s5 1.8 5.5 4.8"/><circle cx="17" cy="9.5" r="2.4"/><path d="M16 14.4c2.6-.2 4.2 1.4 4.5 4.1"/>')],
     ["applicants", "신청자", ico('<rect x="5" y="3.5" width="14" height="17" rx="2.5"/><path d="M9 8.5h6M9 12h6M9 15.5h3.5"/>')],
-    ["sms", "문자", ico('<path d="M5 5.5h14a1.5 1.5 0 0 1 1.5 1.5v8a1.5 1.5 0 0 1-1.5 1.5H11l-4.2 3.5V16.5H5A1.5 1.5 0 0 1 3.5 15V7A1.5 1.5 0 0 1 5 5.5z"/><path d="M8 10h8M8 13h5"/>')],
+    ["people", "참가자", ico('<circle cx="9" cy="8.5" r="3"/><path d="M3.5 19c.5-3 2.7-4.8 5.5-4.8s5 1.8 5.5 4.8"/><circle cx="17" cy="9.5" r="2.4"/><path d="M16 14.4c2.6-.2 4.2 1.4 4.5 4.1"/>')],
+    ["sms", "안내 문자", ico('<path d="M5 5.5h14a1.5 1.5 0 0 1 1.5 1.5v8a1.5 1.5 0 0 1-1.5 1.5H11l-4.2 3.5V16.5H5A1.5 1.5 0 0 1 3.5 15V7A1.5 1.5 0 0 1 5 5.5z"/><path d="M8 10h8M8 13h5"/>')],
     ["picks", "최종 선택", ico('<path d="M12 20s-7.5-4.6-7.5-10A4.2 4.2 0 0 1 12 7.6 4.2 4.2 0 0 1 19.5 10c0 5.4-7.5 10-7.5 10z"/><path d="M9.3 11.6l2 2 3.6-3.8"/>')],
     ["survey", "설문 결과", ico('<path d="M4.5 20V10M10 20V4.5M15.5 20v-7M21 20H3"/>')],
   ];
