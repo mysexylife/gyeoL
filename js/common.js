@@ -36,6 +36,7 @@
     invalid_pin: "비밀번호는 숫자 4자리예요.",
     pin_exists: "이미 비밀번호가 정해진 번호예요. 비밀번호를 입력해 주세요.",
     pin_not_set: "먼저 비밀번호를 정해 주세요.",
+    assigned_first: "이미 배정된 신청자예요. 먼저 배정을 취소한 뒤 삭제해 주세요.",
     results_not_open: "먼저 매칭 결과를 공개해 주세요. 공개한 뒤에 문자를 보낼 수 있어요.",
     not_configured: "문자 서비스 설정이 아직 안 되어 있어요. (서버에 발송 키·발신번호가 없어요)",
     bad_number: "문자를 받을 번호를 정확히 입력해 주세요.",
@@ -222,6 +223,7 @@
         reassign: (pin, ids, round, label) => rpc("admin_reassign", { p_pin: pin, p_ids: ids, p_round: round, p_label: label || round }),
         smsUnmark: (pin, round, kind, ids) => rpc("admin_sms_unmark", { p_pin: pin, p_round: round || "", p_kind: kind, p_ids: ids }),
         applicantRemove: (pin, id) => rpc("admin_applicant_remove", { p_pin: pin, p_id: id }),
+        applicantRemoveMany: (pin, ids) => rpc("admin_applicant_remove_many", { p_pin: pin, p_ids: ids }),
       },
     };
   }
@@ -639,7 +641,13 @@
           const keep = cur.filter((id) => !(ids || []).includes(id));
           s.smsLog[key] = keep; return cur.length - keep.length;
         }),
-        applicantRemove: (pin, id) => op((s) => { checkAdmin(pin); s.applicants = (s.applicants || []).filter((a) => a.id !== id); }),
+        applicantRemove: (pin, id) => op((s) => { checkAdmin(pin); const a = (s.applicants || []).find((x) => x.id === id); if (a && a.assigned_round) fail("assigned_first"); s.applicants = (s.applicants || []).filter((x) => x.id !== id); }),
+        applicantRemoveMany: (pin, ids) => op((s) => {
+          checkAdmin(pin);
+          const before = (s.applicants || []).length;
+          s.applicants = (s.applicants || []).filter((a) => !(ids || []).includes(a.id) || a.assigned_round);
+          return before - s.applicants.length;
+        }),
         import: (pin, round, label, rows, prune) => op((s) => {
           checkAdmin(pin);
           if (!String(round || "").trim()) fail("round_required");

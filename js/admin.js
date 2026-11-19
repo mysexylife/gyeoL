@@ -172,7 +172,7 @@
             <button class="ptog" data-act="toggle" data-id="${p.id}" aria-expanded="${open}" aria-label="${esc(p.name)} 자세히 ${open ? "접기" : "보기"}">${chev}</button></div>
           ${open ? `<dl class="pdet">${rows}<div><dt>설문</dt><dd><span class="tag ${p.submitted ? "y" : "n"}">${p.submitted ? "제출" : "대기"}</span></dd></div>
             <div class="pact"><label>번호 <input class="numin" type="number" min="1" inputmode="numeric" data-id="${p.id}" data-old="${p.number}" value="${p.number}" aria-label="${esc(p.name)} 번호"></label>
-              <span class="pbtns">${p.has_pin ? `<button class="link" data-act="reset-pin" data-phone="${esc(p.phone)}" data-name="${esc(p.name)}">${S.confirm === "rp" + p.phone ? "정말 초기화" : "비밀번호 초기화"}</button>` : `<span class="sub" style="font-size:12px">비밀번호 미설정</span>`}<button class="link" data-act="edit-person" data-id="${p.id}">정보 수정</button><button class="link" data-act="remove" data-id="${p.id}" data-name="${esc(p.name)}">${S.confirm === "rm" + p.id ? "정말 삭제" : "삭제"}</button></span></div></dl>` : ""}
+              <span class="pbtns">${p.has_pin ? `<button class="link" data-act="reset-pin" data-phone="${esc(p.phone)}" data-name="${esc(p.name)}">${S.confirm === "rp" + p.phone ? "정말 초기화" : "비밀번호 초기화"}</button>` : `<span class="sub" style="font-size:12px">비밀번호 미설정</span>`}<button class="link" data-act="edit-person" data-id="${p.id}">정보 수정</button><button class="link" data-act="remove" data-id="${p.id}" data-name="${esc(p.name)}">${S.confirm === "rm" + p.id ? (S.applicants.some((a) => a.phone === p.phone && a.assigned_round === S.round) ? "정말 삭제 (신청자 대기 명단으로 돌아가요)" : "정말 삭제 (완전히 삭제돼요)") : "삭제"}</button></span></div></dl>` : ""}
         </div>`;
       }).join("")}</div>`;
   }
@@ -526,7 +526,7 @@
           <button class="ptog" data-act="toggle" data-id="ap${x.id}" aria-expanded="${open}" aria-label="${esc(x.name)} 자세히 ${open ? "접기" : "보기"}">${chev}</button></div>
         ${open ? `<dl class="pdet">${det}<div><dt>연락처</dt><dd>${esc(fmtPhone(x.phone))}</dd></div>
           <div class="pact"><span>${x.photo_url ? `<a class="link" href="${esc(x.photo_url)}" target="_blank" rel="noopener noreferrer">사진 보기 ↗</a>` : `<span class="sub">사진 링크 없음</span>`}</span>
-            <span class="pbtns">${done ? `<button class="link" data-act="appl-unassign" data-id="${x.id}" data-name="${esc(x.name)}">${S.confirm === "un" + x.id ? "정말 배정 취소(참가자 삭제)" : "배정 취소"}</button>` : ""}<button class="link" data-act="appl-remove" data-id="${x.id}" data-name="${esc(x.name)}">${S.confirm === "ar" + x.id ? "정말 삭제" : "삭제"}</button></span></div></dl>` : ""}
+            <span class="pbtns">${done ? `<button class="link" data-act="appl-unassign" data-id="${x.id}" data-name="${esc(x.name)}">${S.confirm === "un" + x.id ? "정말 배정 취소(참가자 삭제)" : "배정 취소"}</button>` : ""}${done ? "" : `<button class="link" data-act="appl-remove" data-id="${x.id}" data-name="${esc(x.name)}">${S.confirm === "ar" + x.id ? "정말 삭제" : "삭제"}</button>`}</span></div></dl>` : ""}
       </div>`;
     }).join("");
     const lastBar = S.lastAssign ? `<div class="undobar ok"><span>방금 <b>${esc(roundLabel(S.lastAssign.rid))}</b>에 <b>${S.lastAssign.n}명</b>을 배정했어요.</span><span class="pbtns"><button class="btn sm" data-act="appl-undo-last" ${S.busy ? "disabled" : ""}>${S.confirm === "undo" ? "한 번 더 눌러 되돌리기" : "되돌리기"}</button><button class="link" data-act="appl-undo-dismiss">닫기</button></span></div>` : "";
@@ -549,6 +549,7 @@
         <p class="sum"><b>${sel.length}명</b> 선택 <span class="sub">(남 ${addM} · 여 ${addF})</span>${sel.length ? ` → 배정 후 <b>남 ${baseM + addM} · 여 ${baseF + addF}</b>` : ""}</p>
         <div class="toolbar"><span class="toolbar-l"><button class="btn sm ghost" data-act="appl-all">보이는 사람 모두 선택</button> <button class="btn sm ghost" data-act="appl-none">선택 해제</button></span>
           <button class="btn" style="width:auto" data-act="appl-assign" ${sel.length && !S.busy ? "" : "disabled"}>${sel.length}명 배정하기</button></div>
+        ${sel.length ? `<button class="link" data-act="appl-remove-sel" style="justify-self:start" ${S.busy ? "disabled" : ""}>${S.confirm === "rmsel" ? `한 번 더 눌러 대기자 ${sel.length}명 삭제` : `선택한 대기자 ${sel.length}명 삭제 (신청 기록이 지워져요)`}</button>` : ""}
         ${selAsg.length ? `<div class="undobar"><span><b>배정된 ${selAsg.length}명</b>을 선택했어요 <small>(참가자와 메모·선택·설문 기록이 함께 지워져요)</small></span>
           <span class="pbtns"><button class="btn sm ghost" data-act="appl-move" ${S.busy ? "disabled" : ""}>${S.confirm === "mv" ? "한 번 더 눌러 이동" : "위 날짜로 이동"}</button>
           <button class="btn sm ghost" data-act="appl-unassign-sel" ${S.busy ? "disabled" : ""}>${S.confirm === "unsel" ? "한 번 더 눌러 취소" : "배정 취소"}</button></span></div>` : ""}
@@ -719,6 +720,12 @@
       run(async () => { const n = await api.admin.unassignMany(S.pin, S.lastAssign.ids); S.lastAssign = null; try { sessionStorage.removeItem("rn_admin_lastassign"); } catch (e) { /* 무시 */ } toast(n + "명의 배정을 되돌렸어요."); });
     },
     "appl-undo-dismiss": () => { S.lastAssign = null; try { sessionStorage.removeItem("rn_admin_lastassign"); } catch (e) { /* 무시 */ } render(); },
+    "appl-remove-sel": () => {
+      const ids = applFiltered().filter((x) => S.appl.sel[x.id] && !x.assigned_round).map((x) => x.id);
+      if (!ids.length) return;
+      if (S.confirm !== "rmsel") return askConfirm("rmsel");
+      run(async () => { const n = await api.admin.applicantRemoveMany(S.pin, ids); S.appl.sel = {}; toast(n + "명의 신청자를 삭제했어요."); });
+    },
     "appl-remove": (t) => {
       const key = "ar" + t.dataset.id;
       if (S.confirm !== key) return askConfirm(key);

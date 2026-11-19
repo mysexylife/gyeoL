@@ -818,12 +818,27 @@ begin
   return public.admin_assign(p_pin, p_ids, p_round, p_label);
 end $$;
 
+-- 신청자를 삭제한다. 이미 회차에 배정된 신청자는 먼저 배정을 취소해야 한다(참가자가 남지 않도록).
 create or replace function public.admin_applicant_remove(p_pin text, p_id uuid)
 returns void language plpgsql security definer set search_path = public as $$
 begin
   perform public._check_admin(p_pin);
+  if exists (select 1 from public.applicants where id = p_id and assigned_round is not null) then raise exception 'assigned_first'; end if;
   delete from public.sms_log where applicant_id = p_id;
   delete from public.applicants where id = p_id;
+end $$;
+
+-- 대기 중인 신청자 여러 명을 한꺼번에 삭제한다(배정된 사람은 건너뜀). 삭제한 사람 수를 돌려준다.
+create or replace function public.admin_applicant_remove_many(p_pin text, p_ids uuid[])
+returns int language plpgsql security definer set search_path = public as $$
+declare n int;
+begin
+  perform public._check_admin(p_pin);
+  delete from public.sms_log where applicant_id = any(coalesce(p_ids, '{}'::uuid[]))
+    and applicant_id in (select id from public.applicants where assigned_round is null);
+  delete from public.applicants where id = any(coalesce(p_ids, '{}'::uuid[])) and assigned_round is null;
+  get diagnostics n = row_count;
+  return n;
 end $$;
 
 
