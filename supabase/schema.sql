@@ -818,27 +818,44 @@ begin
   return public.admin_assign(p_pin, p_ids, p_round, p_label);
 end $$;
 
--- 신청자를 삭제한다. 이미 회차에 배정된 신청자는 먼저 배정을 취소해야 한다(참가자가 남지 않도록).
+-- 신청자를 삭제한다. 이미 배정된 신청자라면 그 회차의 참가자도 함께 지운다(신청 기록까지 모두 삭제).
 create or replace function public.admin_applicant_remove(p_pin text, p_id uuid)
 returns void language plpgsql security definer set search_path = public as $$
+declare a public.applicants;
 begin
   perform public._check_admin(p_pin);
-  if exists (select 1 from public.applicants where id = p_id and assigned_round is not null) then raise exception 'assigned_first'; end if;
+  select * into a from public.applicants where id = p_id;
+  if a.id is null then return; end if;
+  if a.assigned_round is not null then delete from public.participants where round_id = a.assigned_round and phone = a.phone; end if;
   delete from public.sms_log where applicant_id = p_id;
   delete from public.applicants where id = p_id;
 end $$;
 
--- 대기 중인 신청자 여러 명을 한꺼번에 삭제한다(배정된 사람은 건너뜀). 삭제한 사람 수를 돌려준다.
+-- 여러 신청자를 한꺼번에 삭제한다(배정된 사람은 참가자도 함께). 삭제한 신청자 수를 돌려준다.
 create or replace function public.admin_applicant_remove_many(p_pin text, p_ids uuid[])
 returns int language plpgsql security definer set search_path = public as $$
 declare n int;
 begin
   perform public._check_admin(p_pin);
-  delete from public.sms_log where applicant_id = any(coalesce(p_ids, '{}'::uuid[]))
-    and applicant_id in (select id from public.applicants where assigned_round is null);
-  delete from public.applicants where id = any(coalesce(p_ids, '{}'::uuid[])) and assigned_round is null;
+  delete from public.participants p using public.applicants a
+   where a.id = any(coalesce(p_ids, '{}'::uuid[])) and a.assigned_round is not null and p.round_id = a.assigned_round and p.phone = a.phone;
+  delete from public.sms_log where applicant_id = any(coalesce(p_ids, '{}'::uuid[]));
+  delete from public.applicants where id = any(coalesce(p_ids, '{}'::uuid[]));
   get diagnostics n = row_count;
   return n;
+end $$;
+
+-- 참가자를 삭제한다(신청 기록까지 모두). 신청자 대기 명단으로 되돌리려면 admin_remove(배정 취소)를 쓴다.
+create or replace function public.admin_remove_full(p_pin text, p_id uuid)
+returns void language plpgsql security definer set search_path = public as $$
+declare x public.participants;
+begin
+  perform public._check_admin(p_pin);
+  select * into x from public.participants where id = p_id;
+  if x.id is null then return; end if;
+  delete from public.sms_log where applicant_id in (select id from public.applicants where phone = x.phone and assigned_round = x.round_id);
+  delete from public.applicants where phone = x.phone and assigned_round = x.round_id;
+  delete from public.participants where id = p_id;
 end $$;
 
 

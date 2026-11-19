@@ -36,7 +36,6 @@
     invalid_pin: "비밀번호는 숫자 4자리예요.",
     pin_exists: "이미 비밀번호가 정해진 번호예요. 비밀번호를 입력해 주세요.",
     pin_not_set: "먼저 비밀번호를 정해 주세요.",
-    assigned_first: "이미 배정된 신청자예요. 먼저 배정을 취소한 뒤 삭제해 주세요.",
     results_not_open: "먼저 매칭 결과를 공개해 주세요. 공개한 뒤에 문자를 보낼 수 있어요.",
     not_configured: "문자 서비스 설정이 아직 안 되어 있어요. (서버에 발송 키·발신번호가 없어요)",
     bad_number: "문자를 받을 번호를 정확히 입력해 주세요.",
@@ -193,6 +192,7 @@
         setNumber: (pin, id, n) => rpc("admin_set_number", { p_pin: pin, p_id: id, p_number: n }),
         setPicks: (pin, participantId, targetIds) => rpc("admin_set_picks", { p_pin: pin, p_participant: participantId, p_targets: targetIds }),
         remove: (pin, id) => rpc("admin_remove", { p_pin: pin, p_id: id }),
+        removeFull: (pin, id) => rpc("admin_remove_full", { p_pin: pin, p_id: id }),
         // 결과 안내 문자: Supabase Edge Function(send-result-sms)을 부른다. testTo 가 있으면 그 번호로만 시험 발송한다.
         async sendSms(pin, round, testTo) {
           const url = String(cfg.supabaseUrl).replace(/\/+$/, "") + "/functions/v1/send-result-sms";
@@ -568,6 +568,13 @@
           s.people = s.people.filter((u) => u.id !== id); s.threads = (s.threads || []).filter((t) => t.from !== id && t.to !== id); delete s.picks[id]; delete s.surveys[id]; delete s.notes[id];
           if (s.session === id) s.session = null;
         }),
+        removeFull: (pin, id) => op((s) => {
+          checkAdmin(pin);
+          const gp = s.people.find((u) => u.id === id);
+          if (gp) s.applicants = (s.applicants || []).filter((a) => !(a.phone === gp.phone && a.assigned_round === gp.round));
+          s.people = s.people.filter((u) => u.id !== id); s.threads = (s.threads || []).filter((t) => t.from !== id && t.to !== id); delete s.picks[id]; delete s.surveys[id]; delete s.notes[id];
+          if (s.session === id) s.session = null;
+        }),
         reset: (pin, round) => op((s) => {
           checkAdmin(pin);
           (s.applicants || []).forEach((a) => { if (a.assigned_round === round) a.assigned_round = null; });
@@ -641,11 +648,20 @@
           const keep = cur.filter((id) => !(ids || []).includes(id));
           s.smsLog[key] = keep; return cur.length - keep.length;
         }),
-        applicantRemove: (pin, id) => op((s) => { checkAdmin(pin); const a = (s.applicants || []).find((x) => x.id === id); if (a && a.assigned_round) fail("assigned_first"); s.applicants = (s.applicants || []).filter((x) => x.id !== id); }),
+        applicantRemove: (pin, id) => op((s) => {
+          checkAdmin(pin);
+          const a = (s.applicants || []).find((x) => x.id === id);
+          if (a && a.assigned_round) { const gp = s.people.find((u) => u.round === a.assigned_round && u.phone === a.phone); if (gp) { s.people = s.people.filter((u) => u.id !== gp.id); delete s.picks[gp.id]; delete s.surveys[gp.id]; delete s.notes[gp.id]; if (s.session === gp.id) s.session = null; } }
+          s.applicants = (s.applicants || []).filter((x) => x.id !== id);
+        }),
         applicantRemoveMany: (pin, ids) => op((s) => {
           checkAdmin(pin);
           const before = (s.applicants || []).length;
-          s.applicants = (s.applicants || []).filter((a) => !(ids || []).includes(a.id) || a.assigned_round);
+          (s.applicants || []).filter((a) => (ids || []).includes(a.id) && a.assigned_round).forEach((a) => {
+            const gp = s.people.find((u) => u.round === a.assigned_round && u.phone === a.phone);
+            if (gp) { s.people = s.people.filter((u) => u.id !== gp.id); delete s.picks[gp.id]; delete s.surveys[gp.id]; delete s.notes[gp.id]; if (s.session === gp.id) s.session = null; }
+          });
+          s.applicants = (s.applicants || []).filter((a) => !(ids || []).includes(a.id));
           return before - s.applicants.length;
         }),
         import: (pin, round, label, rows, prune) => op((s) => {
