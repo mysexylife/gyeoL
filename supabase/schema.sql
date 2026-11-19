@@ -162,7 +162,7 @@ create table if not exists public.sms_log (
   participant_id uuid references public.participants(id) on delete set null,
   applicant_id   uuid references public.applicants(id) on delete set null,   -- 예약 확인 문자는 신청자에게 보낸다
   phone          text not null,
-  kind           text not null default 'result',   -- reserve(예약 확인) · confirm(전날 확정) · result(결과 안내)
+  kind           text not null default 'result',   -- reserve(예약 확인) · confirm(전날 확정) · result(결과 안내) · cancel(행사 취소)
   status         text not null check (status in ('sent','failed')),
   error          text,
   created_at     timestamptz not null default now()
@@ -979,17 +979,19 @@ begin
 end $$;
 
 -- ───────────────────────── 결과 안내 문자: 맥북 메시지 앱으로 직접 보내는 방식 ─────────────────────────
--- 문자 종류: reserve(예약 확인, 신청자 대상) · confirm(전날 확정, 회차 참가자) · result(결과 안내, 결과 공개된 회차 참가자)
+-- 문자 종류: reserve(예약 확인, 신청자 대상) · confirm(전날 확정, 회차 참가자) · result(결과 안내, 결과 공개된 회차 참가자) · cancel(행사 취소, 회차 참가자)
 -- 아직 그 문자를 받지 않은 사람(이름·연락처 등)을 돌려준다.
 drop function if exists public.admin_sms_pending(text, text);
 drop function if exists public.admin_sms_mark(text, text);
 drop function if exists public.admin_sms_mark(text, text, text);
+drop function if exists public.admin_sms_save_round(text, text, text, text, text);
 
 -- 문안(전 기기 공통)과 회차별 일시·장소·지도 링크를 DB 에 저장해 어느 맥북에서 열어도 같은 내용이 나오게 한다.
 alter table public.app_settings add column if not exists sms_tpl jsonb not null default '{}'::jsonb;
 alter table public.rounds add column if not exists sms_when text not null default '';
 alter table public.rounds add column if not exists sms_venue text not null default '';
 alter table public.rounds add column if not exists sms_map text not null default '';
+alter table public.rounds add column if not exists sms_extra jsonb not null default '{}'::jsonb;   -- 행사 취소 안내의 사유·환불 안내 등
 
 create or replace function public.admin_sms_get(p_pin text, p_round text)
 returns jsonb language plpgsql security definer set search_path = public as $$
@@ -999,7 +1001,8 @@ begin
     'tpl', coalesce((select sms_tpl from public.app_settings where id = 1), '{}'::jsonb),
     'when', coalesce((select sms_when from public.rounds where id = p_round), ''),
     'venue', coalesce((select sms_venue from public.rounds where id = p_round), ''),
-    'map', coalesce((select sms_map from public.rounds where id = p_round), ''));
+    'map', coalesce((select sms_map from public.rounds where id = p_round), ''),
+    'extra', coalesce((select sms_extra from public.rounds where id = p_round), '{}'::jsonb));
 end $$;
 
 -- 문안 저장. 빈 문자열이면 저장된 문안을 지워 기본 문구로 돌아간다.
@@ -1007,7 +1010,7 @@ create or replace function public.admin_sms_save_tpl(p_pin text, p_kind text, p_
 returns void language plpgsql security definer set search_path = public as $$
 begin
   perform public._check_admin(p_pin);
-  if p_kind not in ('reserve', 'confirm', 'result') then raise exception 'invalid_kind'; end if;
+  if p_kind not in ('reserve', 'confirm', 'result', 'cancel') then raise exception 'invalid_kind'; end if;
   if length(coalesce(p_text, '')) > 2000 then raise exception 'too_long'; end if;
   if btrim(coalesce(p_text, '')) = '' then
     update public.app_settings set sms_tpl = sms_tpl - p_kind where id = 1;
@@ -1016,12 +1019,15 @@ begin
   end if;
 end $$;
 
-create or replace function public.admin_sms_save_round(p_pin text, p_round text, p_when text, p_venue text, p_map text)
+create or replace function public.admin_sms_save_round(p_pin text, p_round text, p_when text, p_venue text, p_map text, p_extra jsonb default '{}'::jsonb)
 returns void language plpgsql security definer set search_path = public as $$
+declare ex jsonb;
 begin
   perform public._check_admin(p_pin);
   if length(coalesce(p_when, '')) > 200 or length(coalesce(p_venue, '')) > 200 or length(coalesce(p_map, '')) > 500 then raise exception 'too_long'; end if;
-  update public.rounds set sms_when = coalesce(p_when, ''), sms_venue = coalesce(p_venue, ''), sms_map = coalesce(p_map, '') where id = p_round;
+  -- 취소 사유·환불 안내만 받는다(각 500자까지)
+  ex := jsonb_build_object('reason', left(coalesce(p_extra->>'reason', ''), 500), 'refund', left(coalesce(p_extra->>'refund', ''), 500));
+  update public.rounds set sms_when = coalesce(p_when, ''), sms_venue = coalesce(p_venue, ''), sms_map = coalesce(p_map, ''), sms_extra = ex where id = p_round;
 end $$;
 
 create or replace function public.admin_sms_pending(p_pin text, p_round text, p_kind text default 'result')
@@ -1030,11 +1036,11 @@ begin
   perform public._check_admin(p_pin);
   if p_kind = 'reserve' then
     return coalesce((
-      select jsonb_agg(jsonb_build_object('id', a.id, 'name', a.name, 'phone', a.phone, 'pref_date', a.pref_date, 'pref_dates', to_jsonb(a.pref_dates),
+      select jsonb_agg(jsonb_build_object('id', a.id, 'name', a.name, 'phone', a.phone, 'gender', a.gender, 'pref_date', a.pref_date, 'pref_dates', to_jsonb(a.pref_dates),
         'sent', exists (select 1 from public.sms_log l where l.applicant_id = a.id and l.kind = 'reserve' and l.status = 'sent')) order by a.created_at)
       from public.applicants a
       where a.phone ~ '^01\d{8,9}$'), '[]'::jsonb);
-  elsif p_kind in ('confirm', 'result') then
+  elsif p_kind in ('confirm', 'result', 'cancel') then
     if p_kind = 'result' and not coalesce((select results_open from public.rounds where id = p_round), false) then raise exception 'results_not_open'; end if;
     return coalesce((
       select jsonb_agg(jsonb_build_object('id', p.id, 'name', p.name, 'phone', p.phone, 'number', p.number, 'gender', p.gender,
@@ -1057,7 +1063,7 @@ begin
     select 'applicants', a.id, a.phone, 'reserve', 'sent' from public.applicants a
     where (p_ids is null or a.id::text in (select jsonb_array_elements_text(p_ids)))
       and not exists (select 1 from public.sms_log l where l.applicant_id = a.id and l.kind = 'reserve' and l.status = 'sent');
-  elsif p_kind in ('confirm', 'result') then
+  elsif p_kind in ('confirm', 'result', 'cancel') then
     insert into public.sms_log (round_id, participant_id, phone, kind, status)
     select p.round_id, p.id, p.phone, p_kind, 'sent' from public.participants p
     where p.round_id = p_round
@@ -1084,5 +1090,8 @@ begin
       'total', (select count(*) from public.participants where round_id = p_round)),
     'result', jsonb_build_object(
       'sent', (select count(*) from public.sms_log where round_id = p_round and kind = 'result' and status = 'sent'),
+      'total', (select count(*) from public.participants where round_id = p_round)),
+    'cancel', jsonb_build_object(
+      'sent', (select count(*) from public.sms_log where round_id = p_round and kind = 'cancel' and status = 'sent'),
       'total', (select count(*) from public.participants where round_id = p_round)));
 end $$;
