@@ -491,19 +491,25 @@
           checkAdmin(pin);
           kind = kind || "result";
           s.smsLog = s.smsLog || {};
+          const prefsOf = (a) => a.pref_dates || (a.pref_date ? [a.pref_date] : []);
           if (kind === "reserve") {
             const done = s.smsLog.reserve || [];
-            return (s.applicants || []).map((a) => ({ id: a.id, name: a.name, phone: a.phone, gender: a.gender, pref_date: a.pref_date, pref_dates: a.pref_dates || (a.pref_date ? [a.pref_date] : []), sent: done.includes(a.id) }));
+            return (s.applicants || []).map((a) => ({ id: a.id, src: "applicant", name: a.name, phone: a.phone, gender: a.gender, pref_date: a.pref_date, pref_dates: prefsOf(a), assigned_round: a.assigned_round || null, sent: done.includes(a.id) }));
           }
           if (kind === "result" && !(s.rounds[round] && s.rounds[round].results_open)) fail("results_not_open");
           const done = s.smsLog[kind + ":" + round] || [];
-          return s.people.filter((p) => p.round === round).sort((x, y) => (x.gender === y.gender ? x.number - y.number : x.gender < y.gender ? 1 : -1)).map((p) => ({ id: p.id, name: p.name, phone: p.phone, number: p.number, gender: p.gender, sent: done.includes(p.id) }));
+          const order = (x, y) => (x.gender === y.gender ? x.number - y.number : x.gender < y.gender ? 1 : -1);
+          const ppl = s.people.filter((p) => p.round === round).sort(order).map((p) => ({ id: p.id, src: "participant", name: p.name, phone: p.phone, number: p.number, gender: p.gender, sent: done.includes(p.id) }));
+          if (kind !== "cancel") return ppl;
+          const apps = (s.applicants || []).filter((a) => !a.assigned_round && prefHits(prefsOf(a), round)).map((a) => ({ id: a.id, src: "applicant", name: a.name, phone: a.phone, gender: a.gender, pref_dates: prefsOf(a), pref_date: a.pref_date, sent: done.includes(a.id) }));
+          return ppl.concat(apps);
         }),
         smsMark: (pin, round, kind, ids) => op((s) => {
           checkAdmin(pin);
           kind = kind || "result";
           s.smsLog = s.smsLog || {};
           const want = (id) => !Array.isArray(ids) || ids.includes(id);
+          const prefsOf = (a) => a.pref_dates || (a.pref_date ? [a.pref_date] : []);
           if (kind === "reserve") {
             const done = s.smsLog.reserve = s.smsLog.reserve || [];
             const todo = (s.applicants || []).filter((a) => want(a.id) && !done.includes(a.id));
@@ -513,7 +519,12 @@
           const key = kind + ":" + round, done = s.smsLog[key] = s.smsLog[key] || [];
           const todo = s.people.filter((p) => p.round === round && want(p.id) && !done.includes(p.id));
           todo.forEach((p) => done.push(p.id));
-          return todo.length;
+          let n = todo.length;
+          if (kind === "cancel") {
+            const ap = (s.applicants || []).filter((a) => !a.assigned_round && prefHits(prefsOf(a), round) && want(a.id) && !done.includes(a.id));
+            ap.forEach((a) => done.push(a.id)); n += ap.length;
+          }
+          return n;
         }),
         smsGet: (pin, round) => op((s) => {
           checkAdmin(pin);
@@ -522,7 +533,7 @@
         }),
         smsSaveTpl: (pin, kind, text) => op((s) => {
           checkAdmin(pin);
-          if (!["reserve", "confirm", "result", "cancel"].includes(kind)) fail("invalid_kind");
+          if (!["reserve", "join", "confirm", "result", "cancel"].includes(kind)) fail("invalid_kind");
           s.smsCfg = s.smsCfg || { tpl: {}, rounds: {} };
           if (String(text || "").trim()) s.smsCfg.tpl[kind] = String(text); else delete s.smsCfg.tpl[kind];
         }),
@@ -537,9 +548,10 @@
           const n = (k) => (s.smsLog[k] || []).length, here = s.people.filter((p) => p.round === round).length;
           return {
             reserve: { sent: n("reserve"), total: (s.applicants || []).length },
+            join: { sent: n("join:" + round), total: here },
             confirm: { sent: n("confirm:" + round), total: here },
             result: { sent: n("result:" + round), total: here },
-            cancel: { sent: n("cancel:" + round), total: here },
+            cancel: { sent: n("cancel:" + round), total: here + (s.applicants || []).filter((a) => !a.assigned_round && prefHits(a.pref_dates || (a.pref_date ? [a.pref_date] : []), round)).length },
           };
         }),
         resetPin: (pin, phone) => op((s) => { checkAdmin(pin); if (s.pins) delete s.pins[normPhone(phone)]; }),
@@ -647,6 +659,7 @@
 
   window.api = isDemo ? demoApi() : liveApi();
   // 신청자의 희망 날짜·시간 목록(예전 데이터는 pref_date 하나만 있다)
+  const prefHits = (prefs, round) => prefs.some((d) => String(d).slice(0, 10) === String(round).slice(0, 10) && (String(round).length === 10 || String(d).length === 10 || d === round));
   const applPrefs = (a) => (a && Array.isArray(a.pref_dates) && a.pref_dates.length ? a.pref_dates : a && a.pref_date ? [a.pref_date] : []);
   window.RN = { applPrefs, SURVEY, MAX_PICKS, MEMO_SLOTS, roundLabel, roundTag, roundDate, mkRound, isRoundId, toRoundId, dateChoices, todayISO, friendly, digits, normPhone, fmtPhone, splitSchool, splitHobby };
 })();
