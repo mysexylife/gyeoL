@@ -205,7 +205,10 @@
           return data;
         },
         smsPending: (pin, round, kind) => rpc("admin_sms_pending", { p_pin: pin, p_round: round || "", p_kind: kind || "result" }),
-        smsMark: (pin, round, kind) => rpc("admin_sms_mark", { p_pin: pin, p_round: round || "", p_kind: kind || "result" }),
+        smsMark: (pin, round, kind, ids) => rpc("admin_sms_mark", { p_pin: pin, p_round: round || "", p_kind: kind || "result", p_ids: Array.isArray(ids) ? ids : null }),
+        smsGet: (pin, round) => rpc("admin_sms_get", { p_pin: pin, p_round: round || "" }),
+        smsSaveTpl: (pin, kind, text) => rpc("admin_sms_save_tpl", { p_pin: pin, p_kind: kind, p_text: text }),
+        smsSaveRound: (pin, round, when, venue, map) => rpc("admin_sms_save_round", { p_pin: pin, p_round: round || "", p_when: when, p_venue: venue, p_map: map }),
         smsCounts: (pin, round) => rpc("admin_sms_counts", { p_pin: pin, p_round: round || "" }),
         resetPin: (pin, phone) => rpc("admin_reset_pin", { p_pin: pin, p_phone: phone }),
         setArrived: (pin, id, arrived) => rpc("admin_set_arrived", { p_pin: pin, p_id: id, p_arrived: !!arrived }),
@@ -490,26 +493,43 @@
           s.smsLog = s.smsLog || {};
           if (kind === "reserve") {
             const done = s.smsLog.reserve || [];
-            return (s.applicants || []).filter((a) => !done.includes(a.id)).map((a) => ({ id: a.id, name: a.name, phone: a.phone, pref_date: a.pref_date }));
+            return (s.applicants || []).map((a) => ({ id: a.id, name: a.name, phone: a.phone, pref_date: a.pref_date, sent: done.includes(a.id) }));
           }
           if (kind === "result" && !(s.rounds[round] && s.rounds[round].results_open)) fail("results_not_open");
           const done = s.smsLog[kind + ":" + round] || [];
-          return s.people.filter((p) => p.round === round && !done.includes(p.id)).map((p) => ({ id: p.id, name: p.name, phone: p.phone, number: p.number }));
+          return s.people.filter((p) => p.round === round).sort((x, y) => (x.gender === y.gender ? x.number - y.number : x.gender < y.gender ? 1 : -1)).map((p) => ({ id: p.id, name: p.name, phone: p.phone, number: p.number, gender: p.gender, sent: done.includes(p.id) }));
         }),
-        smsMark: (pin, round, kind) => op((s) => {
+        smsMark: (pin, round, kind, ids) => op((s) => {
           checkAdmin(pin);
           kind = kind || "result";
           s.smsLog = s.smsLog || {};
+          const want = (id) => !Array.isArray(ids) || ids.includes(id);
           if (kind === "reserve") {
             const done = s.smsLog.reserve = s.smsLog.reserve || [];
-            const todo = (s.applicants || []).filter((a) => !done.includes(a.id));
+            const todo = (s.applicants || []).filter((a) => want(a.id) && !done.includes(a.id));
             todo.forEach((a) => done.push(a.id));
             return todo.length;
           }
           const key = kind + ":" + round, done = s.smsLog[key] = s.smsLog[key] || [];
-          const todo = s.people.filter((p) => p.round === round && !done.includes(p.id));
+          const todo = s.people.filter((p) => p.round === round && want(p.id) && !done.includes(p.id));
           todo.forEach((p) => done.push(p.id));
           return todo.length;
+        }),
+        smsGet: (pin, round) => op((s) => {
+          checkAdmin(pin);
+          const c = s.smsCfg || {}, r = (c.rounds || {})[round] || {};
+          return { tpl: c.tpl || {}, when: r.when || "", venue: r.venue || "", map: r.map || "" };
+        }),
+        smsSaveTpl: (pin, kind, text) => op((s) => {
+          checkAdmin(pin);
+          if (!["reserve", "confirm", "result"].includes(kind)) fail("invalid_kind");
+          s.smsCfg = s.smsCfg || { tpl: {}, rounds: {} };
+          if (String(text || "").trim()) s.smsCfg.tpl[kind] = String(text); else delete s.smsCfg.tpl[kind];
+        }),
+        smsSaveRound: (pin, round, when, venue, map) => op((s) => {
+          checkAdmin(pin);
+          s.smsCfg = s.smsCfg || { tpl: {}, rounds: {} };
+          s.smsCfg.rounds[round] = { when: when || "", venue: venue || "", map: map || "" };
         }),
         smsCounts: (pin, round) => op((s) => {
           checkAdmin(pin);

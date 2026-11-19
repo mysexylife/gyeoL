@@ -977,41 +977,85 @@ end $$;
 -- 아직 그 문자를 받지 않은 사람(이름·연락처 등)을 돌려준다.
 drop function if exists public.admin_sms_pending(text, text);
 drop function if exists public.admin_sms_mark(text, text);
+drop function if exists public.admin_sms_mark(text, text, text);
+
+-- 문안(전 기기 공통)과 회차별 일시·장소·지도 링크를 DB 에 저장해 어느 맥북에서 열어도 같은 내용이 나오게 한다.
+alter table public.app_settings add column if not exists sms_tpl jsonb not null default '{}'::jsonb;
+alter table public.rounds add column if not exists sms_when text not null default '';
+alter table public.rounds add column if not exists sms_venue text not null default '';
+alter table public.rounds add column if not exists sms_map text not null default '';
+
+create or replace function public.admin_sms_get(p_pin text, p_round text)
+returns jsonb language plpgsql security definer set search_path = public as $$
+begin
+  perform public._check_admin(p_pin);
+  return jsonb_build_object(
+    'tpl', coalesce((select sms_tpl from public.app_settings where id = 1), '{}'::jsonb),
+    'when', coalesce((select sms_when from public.rounds where id = p_round), ''),
+    'venue', coalesce((select sms_venue from public.rounds where id = p_round), ''),
+    'map', coalesce((select sms_map from public.rounds where id = p_round), ''));
+end $$;
+
+-- 문안 저장. 빈 문자열이면 저장된 문안을 지워 기본 문구로 돌아간다.
+create or replace function public.admin_sms_save_tpl(p_pin text, p_kind text, p_text text)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  perform public._check_admin(p_pin);
+  if p_kind not in ('reserve', 'confirm', 'result') then raise exception 'invalid_kind'; end if;
+  if length(coalesce(p_text, '')) > 2000 then raise exception 'too_long'; end if;
+  if btrim(coalesce(p_text, '')) = '' then
+    update public.app_settings set sms_tpl = sms_tpl - p_kind where id = 1;
+  else
+    update public.app_settings set sms_tpl = jsonb_set(coalesce(sms_tpl, '{}'::jsonb), array[p_kind], to_jsonb(p_text)) where id = 1;
+  end if;
+end $$;
+
+create or replace function public.admin_sms_save_round(p_pin text, p_round text, p_when text, p_venue text, p_map text)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  perform public._check_admin(p_pin);
+  if length(coalesce(p_when, '')) > 200 or length(coalesce(p_venue, '')) > 200 or length(coalesce(p_map, '')) > 500 then raise exception 'too_long'; end if;
+  update public.rounds set sms_when = coalesce(p_when, ''), sms_venue = coalesce(p_venue, ''), sms_map = coalesce(p_map, '') where id = p_round;
+end $$;
+
 create or replace function public.admin_sms_pending(p_pin text, p_round text, p_kind text default 'result')
 returns jsonb language plpgsql security definer set search_path = public as $$
 begin
   perform public._check_admin(p_pin);
   if p_kind = 'reserve' then
     return coalesce((
-      select jsonb_agg(jsonb_build_object('id', a.id, 'name', a.name, 'phone', a.phone, 'pref_date', a.pref_date) order by a.created_at)
+      select jsonb_agg(jsonb_build_object('id', a.id, 'name', a.name, 'phone', a.phone, 'pref_date', a.pref_date,
+        'sent', exists (select 1 from public.sms_log l where l.applicant_id = a.id and l.kind = 'reserve' and l.status = 'sent')) order by a.created_at)
       from public.applicants a
-      where a.phone ~ '^01\d{8,9}$'
-        and not exists (select 1 from public.sms_log l where l.applicant_id = a.id and l.kind = 'reserve' and l.status = 'sent')), '[]'::jsonb);
+      where a.phone ~ '^01\d{8,9}$'), '[]'::jsonb);
   elsif p_kind in ('confirm', 'result') then
     if p_kind = 'result' and not coalesce((select results_open from public.rounds where id = p_round), false) then raise exception 'results_not_open'; end if;
     return coalesce((
-      select jsonb_agg(jsonb_build_object('id', p.id, 'name', p.name, 'phone', p.phone, 'number', p.number) order by p.gender desc, p.number)
+      select jsonb_agg(jsonb_build_object('id', p.id, 'name', p.name, 'phone', p.phone, 'number', p.number, 'gender', p.gender,
+        'sent', exists (select 1 from public.sms_log l where l.participant_id = p.id and l.kind = p_kind and l.status = 'sent')) order by p.gender desc, p.number)
       from public.participants p
-      where p.round_id = p_round and p.phone ~ '^01\d{8,9}$'
-        and not exists (select 1 from public.sms_log l where l.participant_id = p.id and l.kind = p_kind and l.status = 'sent')), '[]'::jsonb);
+      where p.round_id = p_round and p.phone ~ '^01\d{8,9}$'), '[]'::jsonb);
   end if;
   raise exception 'invalid_kind';
 end $$;
 
--- 진행자가 맥북에서 발송을 마친 뒤 누른다: 아직 기록이 없는 사람 전원을 '발송 완료'로 표시해 다시 보내지 않게 한다.
-create or replace function public.admin_sms_mark(p_pin text, p_round text, p_kind text default 'result')
+-- 진행자가 맥북에서 발송을 마친 뒤 누른다. p_ids 가 있으면 그 사람들만, 없으면 아직 기록이 없는 사람 전원을 '발송 완료'로 표시한다.
+create or replace function public.admin_sms_mark(p_pin text, p_round text, p_kind text default 'result', p_ids jsonb default null)
 returns int language plpgsql security definer set search_path = public as $$
 declare n int;
 begin
   perform public._check_admin(p_pin);
+  if p_ids is not null and jsonb_typeof(p_ids) <> 'array' then raise exception 'invalid_ids'; end if;
   if p_kind = 'reserve' then
     insert into public.sms_log (round_id, applicant_id, phone, kind, status)
     select 'applicants', a.id, a.phone, 'reserve', 'sent' from public.applicants a
-    where not exists (select 1 from public.sms_log l where l.applicant_id = a.id and l.kind = 'reserve' and l.status = 'sent');
+    where (p_ids is null or a.id::text in (select jsonb_array_elements_text(p_ids)))
+      and not exists (select 1 from public.sms_log l where l.applicant_id = a.id and l.kind = 'reserve' and l.status = 'sent');
   elsif p_kind in ('confirm', 'result') then
     insert into public.sms_log (round_id, participant_id, phone, kind, status)
     select p.round_id, p.id, p.phone, p_kind, 'sent' from public.participants p
     where p.round_id = p_round
+      and (p_ids is null or p.id::text in (select jsonb_array_elements_text(p_ids)))
       and not exists (select 1 from public.sms_log l where l.participant_id = p.id and l.kind = p_kind and l.status = 'sent');
   else
     raise exception 'invalid_kind';

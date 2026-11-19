@@ -638,3 +638,8 @@ button.brand { background: none; border: 0; padding: 4px 0; cursor: pointer; -we
 .smsseg { grid-auto-flow: column; }
 .smsseg button small { display: block; font-size: 11px; font-weight: 500; opacity: .8; }
 #sms-tpl { width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; font: 13.5px/1.6 var(--sans); background: var(--surface); resize: vertical; }
+
+/* 문자 받을 사람 선택 목록 */
+.smslist { max-height: 320px; overflow: auto; }
+.smslist .row.apck-row { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; gap: 10px; align-items: center; cursor: pointer; }
+.smslist .row.apck-row input { width: 20px; height: 20px; accent-color: var(--accent); }

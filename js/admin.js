@@ -6,7 +6,7 @@
   const $app = document.getElementById("app");
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
-  const S = { pin: "", data: null, paid: [], thr: [], applicants: [], appl: { date: "", gender: "", showAssigned: false, sel: {}, target: "", newdate: "", newtime: "" }, error: "", confirm: "", busy: false, round: "", rounds: [], tab: "picks", open: {}, openPick: {}, pickEdit: {}, onlyBad: false, onlyAbsent: false, sms: { test: "", last: null, kind: "reserve", venue: "", map: "", when: "", counts: null },
+  const S = { pin: "", data: null, paid: [], thr: [], applicants: [], appl: { date: "", gender: "", showAssigned: false, sel: {}, target: "", newdate: "", newtime: "" }, error: "", confirm: "", busy: false, round: "", rounds: [], tab: "picks", open: {}, openPick: {}, pickEdit: {}, onlyBad: false, onlyAbsent: false, sms: { test: "", last: null, kind: "reserve", venue: "", map: "", when: "", counts: null, tpl: {}, list: [], sel: {}, wasSent: {}, dbOk: true },
     add: { open: false, editing: false, round: "", newdate: "", newtime: "", name: "", gender: "", phone: "", number: "", age: "", school: "", mbti: "", hobby: "" },
     imp: { dest: "applicants", text: "", fileName: "", table: null, map: {}, date: "", round: "", newdate: "", newtime: "", numberedOnly: false, onlyDate: true, prune: false, done: null, error: "" } };
   try { S.pin = sessionStorage.getItem("rn_admin_pin") || ""; S.round = sessionStorage.getItem("rn_admin_round") || ""; S.tab = sessionStorage.getItem("rn_admin_tab") || "picks"; } catch (e) { /* 저장소 사용 불가 */ }
@@ -30,6 +30,7 @@
     S.paid = S.round ? await api.admin.paid(S.pin, S.round) : [];
     S.thr = S.round ? await api.admin.threads(S.pin, S.round) : [];
     try { S.sms.counts = await api.admin.smsCounts(S.pin, S.round); } catch (e) { S.sms.counts = null; }   // SQL 을 아직 안 돌렸으면 숫자만 못 보여준다
+    await loadSms();
     S.data = S.round ? await api.admin.dashboard(S.pin, S.round) : { round: null, results_open: false, participants: [], matches: [], surveys: [] };
     try { sessionStorage.setItem("rn_admin_round", S.round); sessionStorage.setItem("rn_admin_tab", S.tab); } catch (e) { /* 무시 */ }
   }
@@ -317,14 +318,43 @@
     result: ["안녕하세요, 로테이션 소개팅 [결] 운영진입니다 :)", "오늘 참여해 주셔서 감사합니다!", "", "최종 선택 결과가 나왔어요.", "아래 링크에서 로그인 후 최종선택 탭에서 확인해 주세요.", "{링크}", "", "인스타그램을 팔로우하면 다음 회차 소식과 콘텐츠를 확인하실 수 있어요ㅎㅎ", "→ @gyeol.meet_official"].join("\n"),
   };
   const SMS_WHO = { reserve: "신청자(구글폼으로 들어온 사람) 중 아직 받지 않은 사람", confirm: "이 날짜(회차)에 배정된 참가자 중 아직 받지 않은 사람", result: "이 날짜(회차) 참가자 중 아직 받지 않은 사람 (결과를 공개한 뒤에만)" };
+  // 문안과 회차별 일시·장소·지도는 DB 에 저장해 어느 기기에서 열어도 같다. (SQL 을 아직 안 돌렸다면 이 화면에서만 유지)
   const smsStoreKey = "rn_sms_tpl_v1";
+  let smsTimer = null;   // 입력 후 잠깐 기다렸다 저장(타자마다 서버를 부르지 않게)
   function smsTpl(kind) {
-    try { const o = JSON.parse(localStorage.getItem(smsStoreKey) || "{}"); if (typeof o[kind] === "string" && o[kind].trim()) return o[kind]; } catch (e) { /* 기본 문구 */ }
-    return SMS_DEFAULT[kind];
+    const t = S.sms.tpl[kind];
+    return typeof t === "string" && t.trim() ? t : SMS_DEFAULT[kind];
   }
-  function smsSaveTpl(kind, text) {
-    try { const o = JSON.parse(localStorage.getItem(smsStoreKey) || "{}"); o[kind] = text; localStorage.setItem(smsStoreKey, JSON.stringify(o)); } catch (e) { /* 저장소 사용 불가: 이번 화면에서만 유지 */ }
+  function smsQueueSave() { clearTimeout(smsTimer); smsTimer = setTimeout(smsFlushSave, 700); }
+  async function smsFlushSave() {
+    clearTimeout(smsTimer); smsTimer = null;
+    const kind = S.sms.kind, round = S.round, tpl = S.sms.tpl[kind] || "";
+    try {
+      await api.admin.smsSaveTpl(S.pin, kind, tpl);
+      if (round) await api.admin.smsSaveRound(S.pin, round, S.sms.when, S.sms.venue, S.sms.map);
+    } catch (e) { if (S.sms.dbOk) toast("문안을 서버에 저장하지 못했어요(SQL 최신본을 실행했는지 확인). 이 화면에서만 유지돼요."); S.sms.dbOk = false; }
   }
+  function smsSaveTpl(kind, text) { S.sms.tpl[kind] = text; smsQueueSave(); }
+  // 서버의 문안·장소와 발송 대상 목록을 불러온다. 선택 상태(체크)는 15초 새로고침에도 유지한다.
+  async function loadSms() {
+    const typing = smsTimer !== null;   // 저장 대기 중이면 서버 값으로 덮지 않는다
+    try {
+      const c = await api.admin.smsGet(S.pin, S.round);
+      S.sms.dbOk = true;
+      if (!typing) { S.sms.tpl = c.tpl || {}; S.sms.when = c.when || ""; S.sms.venue = c.venue || ""; S.sms.map = c.map || ""; }
+    } catch (e) { S.sms.dbOk = false; }
+    let list = [];
+    try { list = S.round || S.sms.kind === "reserve" ? await api.admin.smsPending(S.pin, S.round, S.sms.kind) : []; } catch (e) { list = []; }   // 결과 미공개 등은 빈 목록
+    const kind = S.sms.kind;
+    list.forEach((x) => {
+      const k = kind + ":" + x.id;
+      if (!(k in S.sms.wasSent)) S.sms.sel[k] = !x.sent;                  // 처음 보는 사람: 아직 안 보냈으면 선택
+      else if (x.sent && !S.sms.wasSent[k]) S.sms.sel[k] = false;         // 방금 발송 완료가 된 사람은 선택 해제
+      S.sms.wasSent[k] = !!x.sent;
+    });
+    S.sms.list = list;
+  }
+  const smsSelIds = () => S.sms.list.filter((x) => S.sms.sel[S.sms.kind + ":" + x.id]).map((x) => x.id);
   // {이름} {희망날짜} {일시} {장소} {링크} 를 채운다. 값이 비어 있는 자리표시가 든 줄은 통째로 뺀다(예: 희망 날짜를 안 고른 사람)
   function renderTpl(tpl, vars) {
     return String(tpl).split("\n").filter((line) => {
@@ -367,9 +397,10 @@
   function smsSendState(d) {
     const open = !!d.results_open, kind = S.sms.kind, st = smsRest(kind, d);
     const needVenue = kind === "confirm" && (!S.sms.venue.trim() || !S.sms.map.trim());
-    const canSend = !S.busy && st.rest > 0 && !(kind === "result" && !open) && !needVenue;
-    const label = kind === "result" && !open ? "먼저 결과를 공개해 주세요" : needVenue ? "장소와 지도 링크를 입력해 주세요" : !st.rest ? "모두 발송했어요" : `발송 스크립트 받기 (${st.rest}명)`;
-    return { canSend, label, st, open };
+    const n = smsSelIds().length;
+    const canSend = !S.busy && n > 0 && !(kind === "result" && !open) && !needVenue;
+    const label = kind === "result" && !open ? "먼저 결과를 공개해 주세요" : needVenue ? "장소와 지도 링크를 입력해 주세요" : !n ? "보낼 사람을 선택해 주세요" : `발송 스크립트 받기 (선택 ${n}명)`;
+    return { canSend, label, st, open, n };
   }
   function updateSmsButtons() {
     if (!S.data) return;
@@ -395,13 +426,17 @@
       <label class="mp" for="sms-tpl"><span>문안 <small>{이름} {희망날짜} {일시} {장소} {지도} {도착시간} {링크} 를 쓸 수 있어요. 값이 없는 자리표시가 든 줄은 빠져요.</small></span><textarea id="sms-tpl" rows="9">${esc(tpl)}</textarea></label>
       <details class="smsprev"><summary>미리 보기 (예시 값)</summary><pre>${esc(preview)}</pre></details>
       <button class="link" data-act="sms-tpl-reset" style="justify-self:start">이 문안을 기본 문구로 되돌리기</button>
+      <h3 class="sub-h">받는 사람 선택 <span class="sub" id="sms-selcount">${smsSelIds().length}명 선택 / 목록 ${S.sms.list.length}명</span></h3>
+      <div class="filters"><button class="btn sm ghost" data-act="sms-sel" data-v="unsent">아직 안 보낸 사람만</button><button class="btn sm ghost" data-act="sms-sel" data-v="all">전체 선택</button><button class="btn sm ghost" data-act="sms-sel" data-v="none">전체 해제</button></div>
+      ${S.sms.list.length ? `<div class="rows smslist">${S.sms.list.map((x) => `<label class="row apck-row"><input type="checkbox" data-sms-sel="${x.id}" ${S.sms.sel[kind + ":" + x.id] ? "checked" : ""} aria-label="${esc(x.name)} 선택"><span class="rm"><b>${x.number ? x.number + "번 " : ""}${esc(x.name)}</b> <span class="sub">${esc(fmtPhone(x.phone))}</span>${x.gender ? ` <span class="pg g-${x.gender}">${x.gender === "M" ? "남" : "여"}</span>` : ""}${kind === "reserve" && x.pref_date ? ` <span class="sub">${esc(fmtMD(x.pref_date))}</span>` : ""}</span>${x.sent ? `<span class="tag y">발송됨</span>` : `<span class="tag n">미발송</span>`}</label>`).join("")}</div>` : `<p class="sub">${kind === "result" && !open ? "결과를 공개하면 목록이 나와요." : "보낼 수 있는 사람이 없어요."}</p>`}
+      <p class="note">이미 보낸 사람도 체크하면 다시 보낼 수 있어요. <b>스크립트를 받은 뒤, 맥북에서 실행을 마치고 [발송 완료로 표시]</b>를 눌러야 기록돼요.</p>
       <h3 class="sub-h">보내는 순서</h3>
-      <ol class="how"><li><b>테스트 스크립트</b>로 내 번호에 먼저 1건 보내 봅니다.</li><li>잘 오면 <b>발송 스크립트</b>를 받아 맥북의 <b>스크립트 편집기</b>로 열고 ▶ 실행합니다(한 명씩 5초 간격으로 나가요).</li><li>끝나면 <b>발송 완료로 표시</b>를 눌러 중복 발송을 막습니다.</li></ol>
+      <ol class="how"><li><b>테스트 스크립트</b>로 내 번호에 먼저 1건 보내 봅니다.</li><li>잘 오면 <b>발송 스크립트</b>를 받아 맥북의 <b>스크립트 편집기</b>로 열고 ▶ 실행합니다(한 명씩 5초 간격으로 나가요).</li><li>끝나면 <b>발송 완료로 표시</b>를 눌러 선택한 사람을 기록합니다(중복 발송 방지).</li></ol>
       <div class="filters"><label class="mp" for="sms-test"><span>테스트 문자 받을 번호</span><input id="sms-test" type="tel" inputmode="numeric" placeholder="내 휴대폰 번호" value="${esc(S.sms.test)}"></label>
         <button class="btn sm ghost" data-act="mac-test" ${S.busy ? "disabled" : ""}>테스트 스크립트 받기</button></div>
       <button class="btn" data-act="mac-send" ${canSend ? "" : "disabled"}>${label}</button>
       <button class="btn ghost" data-act="mac-mark" ${canSend ? "" : "disabled"}>${S.confirm === "mark" ? "한 번 더 눌러 표시" : "발송 완료로 표시"}</button>
-      <p class="note">스크립트 파일에는 번호가 들어 있어요. 보낸 뒤에는 <b>파일을 삭제</b>하세요. 문안과 장소는 이 브라우저에 저장돼요(다른 기기에서는 다시 입력).</p>
+      <p class="note">스크립트 파일에는 번호가 들어 있어요. 보낸 뒤에는 <b>파일을 삭제</b>하세요. 문안·일시·장소는 서버에 저장돼서 다른 기기(다른 팀원의 맥북)에서도 같게 나와요.</p>
       ${kind === "result" ? `<details class="smsprev"><summary>솔라피로 자동 발송 (서비스 가입 시)</summary>
         <div style="display:grid;gap:8px;margin-top:8px"><button class="btn sm ghost" data-act="sms-test" ${S.busy ? "disabled" : ""}>솔라피로 테스트 1건</button>
           <button class="btn sm" data-act="sms-send" ${!open || S.busy || !st.rest ? "disabled" : ""}>${S.confirm === "sms" ? `한 번 더 눌러 ${st.rest}명에게 발송` : `솔라피로 결과 안내 문자 보내기 (${st.rest}명)`}</button></div></details>` : ""}
@@ -700,8 +735,9 @@
       if (S.confirm !== key) return askConfirm(key);
       run(async () => { await api.admin.threadDelete(S.pin, t.dataset.id); toast("실을 삭제했어요. 보낸 사람은 다시 보낼 수 있어요."); });
     },
-    "sms-kind": (t) => { S.sms.kind = t.dataset.v; S.sms.last = null; S.confirm = ""; render(); },
-    "sms-tpl-reset": () => { smsSaveTpl(S.sms.kind, SMS_DEFAULT[S.sms.kind]); toast("기본 문구로 되돌렸어요."); render(); },
+    "sms-kind": (t) => { smsFlushSave(); S.sms.kind = t.dataset.v; S.sms.last = null; S.confirm = ""; S.sms.list = []; render(); run(async () => {}); },
+    "sms-sel": (t) => { const v = t.dataset.v; S.sms.list.forEach((x) => { S.sms.sel[S.sms.kind + ":" + x.id] = v === "all" ? true : v === "none" ? false : !x.sent; }); render(); },
+    "sms-tpl-reset": () => { S.sms.tpl[S.sms.kind] = ""; smsFlushSave(); toast("기본 문구로 되돌렸어요."); render(); },
     "mac-test": () => {
       const to = digits(S.sms.test), kind = S.sms.kind;
       if (!/^01\d{8,9}$/.test(to)) return toast("테스트 문자를 받을 휴대폰 번호를 정확히 입력해 주세요.");
@@ -713,8 +749,10 @@
       const kind = S.sms.kind;
       if (kind === "confirm" && (!S.sms.venue.trim() || !S.sms.map.trim())) return toast("장소와 지도 링크를 먼저 입력해 주세요.");
       run(async () => {
-        const list = await api.admin.smsPending(S.pin, S.round, kind);
-        if (!list.length) return toast("보낼 사람이 없어요.");
+        await smsFlushSave();   // 방금 고친 문안도 먼저 저장
+        const ids = new Set(smsSelIds());
+        const list = S.sms.list.filter((x) => ids.has(x.id));
+        if (!list.length) return toast("보낼 사람을 선택해 주세요.");
         const tpl = smsTpl(kind);
         const items = list.map((x) => ({ phone: x.phone, text: renderTpl(tpl, smsVars(kind, x)) }));
         downloadText("gyeol-sms-" + kind + "-" + (kind === "reserve" ? todayISO().replace(/\D/g, "") : String(S.round).replace(/\D/g, "")) + ".applescript", window.MacSms.buildItems(items, 5));
@@ -724,7 +762,7 @@
     "mac-mark": () => {
       if (S.confirm !== "mark") return askConfirm("mark");
       const kind = S.sms.kind;
-      run(async () => { const n = await api.admin.smsMark(S.pin, S.round, kind); toast(n + "명을 발송 완료로 표시했어요."); });
+      run(async () => { const ids = smsSelIds(); if (!ids.length) return toast("표시할 사람을 선택해 주세요."); const n = await api.admin.smsMark(S.pin, S.round, kind, ids); toast(n + "명을 발송 완료로 표시했어요."); });
     },
     "sms-test": () => {
       const to = digits(S.sms.test);
@@ -759,6 +797,7 @@
     if (t.id === "ap-gender") { S.appl.gender = t.value; render(); return; }
     if (t.id === "ap-showdone") { S.appl.showAssigned = t.checked; render(); return; }
     if (t.id === "ap-target") { S.appl.target = t.value; render(); return; }
+    if (t.dataset && t.dataset.smsSel) { S.sms.sel[S.sms.kind + ":" + t.dataset.smsSel] = !!t.checked; updateSmsButtons(); const c = document.getElementById("sms-selcount"); if (c) c.textContent = smsSelIds().length + "명 선택 / 목록 " + S.sms.list.length + "명"; return; }
     if (t.dataset && t.dataset.applSel) { if (t.checked) S.appl.sel[t.dataset.applSel] = true; else delete S.appl.sel[t.dataset.applSel]; render(); return; }
     const im = S.imp;
     if (t.id === "imp-file" && t.files && t.files[0]) {
@@ -797,9 +836,9 @@
     if (e.target.id === "imp-text") S.imp.text = e.target.value;
     if (e.target.id === "imp-newdate") S.imp.newdate = e.target.value;
     if (e.target.id === "sms-test") S.sms.test = e.target.value.replace(/\D/g, "").slice(0, 11);
-    if (e.target.id === "sms-venue") { S.sms.venue = e.target.value; updateSmsButtons(); }
-    if (e.target.id === "sms-when") S.sms.when = e.target.value;
-    if (e.target.id === "sms-map") { S.sms.map = e.target.value; updateSmsButtons(); }
+    if (e.target.id === "sms-venue") { S.sms.venue = e.target.value; smsQueueSave(); updateSmsButtons(); }
+    if (e.target.id === "sms-when") { S.sms.when = e.target.value; smsQueueSave(); }
+    if (e.target.id === "sms-map") { S.sms.map = e.target.value; smsQueueSave(); updateSmsButtons(); }
     if (e.target.id === "sms-tpl") smsSaveTpl(S.sms.kind, e.target.value);
     if (e.target.id === "ap-newdate") S.appl.newdate = e.target.value;
     if (e.target.id === "ap-newtime") S.appl.newtime = e.target.value;
