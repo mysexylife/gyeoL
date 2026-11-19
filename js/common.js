@@ -218,6 +218,9 @@
         applicantImport: (pin, rows) => rpc("admin_applicant_import", { p_pin: pin, p_rows: rows }),
         assign: (pin, ids, round, label) => rpc("admin_assign", { p_pin: pin, p_ids: ids, p_round: round, p_label: label }),
         unassign: (pin, id) => rpc("admin_unassign", { p_pin: pin, p_id: id }),
+        unassignMany: (pin, ids) => rpc("admin_unassign_many", { p_pin: pin, p_ids: ids }),
+        reassign: (pin, ids, round, label) => rpc("admin_reassign", { p_pin: pin, p_ids: ids, p_round: round, p_label: label || round }),
+        smsUnmark: (pin, round, kind, ids) => rpc("admin_sms_unmark", { p_pin: pin, p_round: round || "", p_kind: kind, p_ids: ids }),
         applicantRemove: (pin, id) => rpc("admin_applicant_remove", { p_pin: pin, p_id: id }),
       },
     };
@@ -615,6 +618,26 @@
           const gp = s.people.find((x) => x.round === a.assigned_round && x.phone === a.phone);
           if (gp) { s.people = s.people.filter((x) => x.id !== gp.id); delete s.picks[gp.id]; delete s.surveys[gp.id]; delete s.notes[gp.id]; if (s.session === gp.id) s.session = null; }
           a.assigned_round = null;
+        }),
+        unassignMany: (pin, ids) => op((s) => {
+          checkAdmin(pin);
+          let n = 0;
+          (ids || []).forEach((id) => {
+            const a = (s.applicants || []).find((x) => x.id === id);
+            if (!a || !a.assigned_round) return;
+            const gp = s.people.find((x) => x.round === a.assigned_round && x.phone === a.phone);
+            if (gp) { s.people = s.people.filter((x) => x.id !== gp.id); delete s.picks[gp.id]; delete s.surveys[gp.id]; delete s.notes[gp.id]; if (s.session === gp.id) s.session = null; }
+            a.assigned_round = null; n++;
+          });
+          return n;
+        }),
+        reassign: async function (pin, ids, round, label) { await this.unassignMany(pin, ids); return this.assign(pin, ids, round, label); },
+        smsUnmark: (pin, round, kind, ids) => op((s) => {
+          checkAdmin(pin);
+          s.smsLog = s.smsLog || {};
+          const key = kind === "reserve" ? "reserve" : kind + ":" + round, cur = s.smsLog[key] || [];
+          const keep = cur.filter((id) => !(ids || []).includes(id));
+          s.smsLog[key] = keep; return cur.length - keep.length;
         }),
         applicantRemove: (pin, id) => op((s) => { checkAdmin(pin); s.applicants = (s.applicants || []).filter((a) => a.id !== id); }),
         import: (pin, round, label, rows, prune) => op((s) => {

@@ -655,3 +655,7 @@ button.brand { background: none; border: 0; padding: 4px 0; cursor: pointer; -we
 .row.smsall .rm { display: flex; gap: 8px; align-items: baseline; white-space: nowrap; }
 .smslist .row.apck-row { padding: 6px 10px; }
 .smslist .row.apck-row .rm { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+/* 배정 되돌리기 안내 줄 */
+.undobar { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; justify-content: space-between; padding: 10px 12px; margin: 10px 0 0; border-radius: 12px; background: rgba(0,0,0,.05); font-size: 13.5px; }
+.undobar.ok { background: rgba(176, 108, 54, .12); margin: 0 0 12px; }
+.undobar small { opacity: .75; }

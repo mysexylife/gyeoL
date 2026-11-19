@@ -9,6 +9,8 @@
   const S = { pin: "", data: null, paid: [], thr: [], applicants: [], appl: { date: "", time: "", gender: "", showAssigned: false, sel: {}, target: "", newdate: "", newtime: "" }, error: "", confirm: "", busy: false, round: "", rounds: [], tab: "picks", open: {}, openPick: {}, pickEdit: {}, onlyBad: false, onlyAbsent: false, sms: { test: "", last: null, kind: "reserve", venue: "", map: "", when: "", counts: null, tpl: {}, list: [], sel: {}, wasSent: {}, dbOk: true, f: { status: "unsent", q: "", date: "", time: "", src: "" } },
     add: { open: false, editing: false, round: "", newdate: "", newtime: "", name: "", gender: "", phone: "", number: "", age: "", school: "", mbti: "", hobby: "" },
   };
+  S.lastAssign = null;
+  try { S.lastAssign = JSON.parse(sessionStorage.getItem("rn_admin_lastassign") || "null"); } catch (e) { S.lastAssign = null; }
   try { S.pin = sessionStorage.getItem("rn_admin_pin") || ""; S.round = sessionStorage.getItem("rn_admin_round") || ""; S.tab = sessionStorage.getItem("rn_admin_tab") || "applicants"; } catch (e) { /* 저장소 사용 불가 */ }
 
   let toastTimer;
@@ -286,6 +288,7 @@
       const k = kind + ":" + x.id;
       if (!(k in S.sms.wasSent)) S.sms.sel[k] = !x.sent;                  // 처음 보는 사람: 아직 안 보냈으면 선택
       else if (x.sent && !S.sms.wasSent[k]) S.sms.sel[k] = false;         // 방금 발송 완료가 된 사람은 선택 해제
+      else if (!x.sent && S.sms.wasSent[k]) S.sms.sel[k] = true;          // 발송 표시를 되돌린 사람은 다시 선택
       S.sms.wasSent[k] = !!x.sent;
     });
     S.sms.list = list;
@@ -298,6 +301,8 @@
       && (S.sms.kind !== "reserve" || !f.date || (f.date === "__none" ? !applPrefs(x).length : applPrefs(x).some((d) => roundDate(d) === f.date && (!f.time || (d.slice(11) || "__none") === f.time))))
       && (S.sms.kind !== "cancel" || !f.src || x.src === f.src));
   }
+  // 체크된 사람 중 이미 '발송됨'인 사람(발송 표시를 잘못 눌렀을 때 되돌리는 대상)
+  const smsSentSel = () => smsVisible().filter((x) => x.sent && S.sms.sel[S.sms.kind + ":" + x.id]);
   // 보낼 사람 = 화면에 보이는 사람 중 체크된 사람 (필터로 가려진 사람은 보내지 않는다)
   const smsSelIds = () => smsVisible().filter((x) => S.sms.sel[S.sms.kind + ":" + x.id]).map((x) => x.id);
   // {이름} {희망날짜} {일시} {장소} {링크} 를 채운다. 값이 비어 있는 자리표시가 든 줄은 통째로 뺀다(예: 희망 날짜를 안 고른 사람)
@@ -407,6 +412,7 @@
       <div class="filters">${roundSel}${when}${place}</div>
       ${smsFilterBar(kind)}
       <div id="sms-listbox">${smsRowsHtml()}</div>
+      ${smsSentSel().length ? `<button class="link" data-act="mac-unmark" style="justify-self:start">${S.confirm === "unmark" ? "한 번 더 눌러 표시 해제" : `선택한 사람 중 발송됨 ${smsSentSel().length}명을 미발송으로 되돌리기`}</button>` : ""}
       <details class="smsprev"><summary>문안 보기 · 수정</summary>
         <label class="mp" for="sms-tpl"><span>문안 <small>{이름} {희망날짜} {일시} {장소} {지도} {도착시간} {링크} · 값이 없는 줄은 빠져요</small></span><textarea id="sms-tpl" rows="10">${esc(tpl)}</textarea></label>
         <p class="sub" style="font-size:12.5px;margin:8px 0 4px">미리 보기 (예시)</p><pre id="sms-preview">${esc(renderTpl(tpl, smsVars(kind, null)))}</pre>
@@ -502,7 +508,7 @@
     const prefTimes = Array.from(new Set(onDate.flatMap((x) => prefsOn(x, a.date).map((p) => p.slice(11))).filter(Boolean))).sort();
     const hasNoTime = onDate.some((x) => prefsOn(x, a.date).some((p) => !p.slice(11)));
     const cntWait = (f) => { const w = wait.filter(f); return " · 대기 " + w.length + "명(남 " + w.filter((x) => x.gender === "M").length + " 여 " + w.filter((x) => x.gender === "F").length + ")"; };
-    const sel = list.filter((x) => a.sel[x.id] && !x.assigned_round), tg = applTarget();
+    const sel = list.filter((x) => a.sel[x.id] && !x.assigned_round), selAsg = list.filter((x) => a.sel[x.id] && x.assigned_round), tg = applTarget();
     const cnt = (g) => wait.filter((x) => x.gender === g).length;
     const tr = S.rounds.find((r) => r.id === tg), baseM = tr ? tr.male || 0 : 0, baseF = tr ? tr.female || 0 : 0;
     const addM = sel.filter((x) => x.gender === "M").length, addF = sel.filter((x) => x.gender === "F").length;
@@ -514,7 +520,7 @@
         .map(([k, v]) => `<div><dt>${k}</dt><dd>${esc(v || "-")}</dd></div>`).join("");
       return `<div class="prow ${open ? "open" : ""} ${done ? "done" : ""}" role="listitem">
         <div class="pmain apmain">
-          ${done ? `<span class="apck"></span>` : `<label class="apck"><input type="checkbox" data-appl-sel="${x.id}" ${a.sel[x.id] ? "checked" : ""} aria-label="${esc(x.name)} 선택"></label>`}
+          <label class="apck"><input type="checkbox" data-appl-sel="${x.id}" ${a.sel[x.id] ? "checked" : ""} aria-label="${esc(x.name)} 선택"></label>
           <span class="pnm">${esc(x.name)}</span><span class="pg g-${x.gender}">${x.gender === "M" ? "남" : "여"}</span>
           <span class="pph">${done ? `<span class="tag y">${esc(roundLabel(x.assigned_round))} 배정</span>` : esc(x.age_label || "")}</span>
           <button class="ptog" data-act="toggle" data-id="ap${x.id}" aria-expanded="${open}" aria-label="${esc(x.name)} 자세히 ${open ? "접기" : "보기"}">${chev}</button></div>
@@ -523,7 +529,8 @@
             <span class="pbtns">${done ? `<button class="link" data-act="appl-unassign" data-id="${x.id}" data-name="${esc(x.name)}">${S.confirm === "un" + x.id ? "정말 배정 취소(참가자 삭제)" : "배정 취소"}</button>` : ""}<button class="link" data-act="appl-remove" data-id="${x.id}" data-name="${esc(x.name)}">${S.confirm === "ar" + x.id ? "정말 삭제" : "삭제"}</button></span></div></dl>` : ""}
       </div>`;
     }).join("");
-    return `<section class="stats s3">
+    const lastBar = S.lastAssign ? `<div class="undobar ok"><span>방금 <b>${esc(roundLabel(S.lastAssign.rid))}</b>에 <b>${S.lastAssign.n}명</b>을 배정했어요.</span><span class="pbtns"><button class="btn sm" data-act="appl-undo-last" ${S.busy ? "disabled" : ""}>${S.confirm === "undo" ? "한 번 더 눌러 되돌리기" : "되돌리기"}</button><button class="link" data-act="appl-undo-dismiss">닫기</button></span></div>` : "";
+    return `${lastBar}<section class="stats s3">
         <div class="stat"><small>대기 남성</small><b>${cnt("M")}<em>명</em></b></div>
         <div class="stat"><small>대기 여성</small><b>${cnt("F")}<em>명</em></b></div>
         <div class="stat"><small>배정 완료</small><b>${all.length - wait.length}<em>/ ${all.length}명</em></b></div>
@@ -540,8 +547,11 @@
           ${tg === "__new" ? `<label class="mp"><span>새 날짜</span><input type="date" id="ap-newdate" value="${esc(a.newdate || todayISO())}"></label>${timeField("ap-newtime", a.newtime)}` : ""}
         </div>
         <p class="sum"><b>${sel.length}명</b> 선택 <span class="sub">(남 ${addM} · 여 ${addF})</span>${sel.length ? ` → 배정 후 <b>남 ${baseM + addM} · 여 ${baseF + addF}</b>` : ""}</p>
-        <div class="toolbar"><span class="toolbar-l"><button class="btn sm ghost" data-act="appl-all">보이는 대기자 모두 선택</button> <button class="btn sm ghost" data-act="appl-none">선택 해제</button></span>
+        <div class="toolbar"><span class="toolbar-l"><button class="btn sm ghost" data-act="appl-all">보이는 사람 모두 선택</button> <button class="btn sm ghost" data-act="appl-none">선택 해제</button></span>
           <button class="btn" style="width:auto" data-act="appl-assign" ${sel.length && !S.busy ? "" : "disabled"}>${sel.length}명 배정하기</button></div>
+        ${selAsg.length ? `<div class="undobar"><span><b>배정된 ${selAsg.length}명</b>을 선택했어요 <small>(참가자와 메모·선택·설문 기록이 함께 지워져요)</small></span>
+          <span class="pbtns"><button class="btn sm ghost" data-act="appl-move" ${S.busy ? "disabled" : ""}>${S.confirm === "mv" ? "한 번 더 눌러 이동" : "위 날짜로 이동"}</button>
+          <button class="btn sm ghost" data-act="appl-unassign-sel" ${S.busy ? "disabled" : ""}>${S.confirm === "unsel" ? "한 번 더 눌러 취소" : "배정 취소"}</button></span></div>` : ""}
       </section>
       <section style="display:grid;gap:10px"><div class="sec-title"><h2>신청자</h2><span>${list.length}명 · 사진·연락처는 진행자만 볼 수 있어요</span></div>
         ${list.length ? `<div class="plist" role="list">${rowsHtml}</div>` : `<div class="empty"><b>대기 중인 신청자가 없어요</b><p>구글폼을 연동하면 제출 즉시 여기에 나타나요. 연동 전 응답은 '참가자 추가' 탭의 명단 가져오기에서 <b>신청자 명단</b>으로 넣어 주세요.</p></div>`}</section>`;
@@ -665,7 +675,7 @@
       try { await navigator.clipboard.writeText(entryUrl()); toast("링크를 복사했어요."); }
       catch (e) { toast("링크를 길게 눌러 복사해 주세요."); }
     },
-    "appl-all": () => { applFiltered().filter((x) => !x.assigned_round).forEach((x) => { S.appl.sel[x.id] = true; }); render(); },
+    "appl-all": () => { applFiltered().forEach((x) => { S.appl.sel[x.id] = true; }); render(); },
     "appl-none": () => { S.appl.sel = {}; render(); },
     "appl-assign": () => {
       const ids = applFiltered().filter((x) => S.appl.sel[x.id] && !x.assigned_round).map((x) => x.id);
@@ -675,6 +685,7 @@
       run(async () => {
         const r = await api.admin.assign(S.pin, ids, rid, roundLabel(rid));
         S.appl.sel = {}; S.appl.target = rid; S.round = rid;
+        if (r.assigned) { S.lastAssign = { ids, rid, n: r.assigned }; try { sessionStorage.setItem("rn_admin_lastassign", JSON.stringify(S.lastAssign)); } catch (e) { /* 무시 */ } }
         toast(roundLabel(rid) + "에 " + r.assigned + "명을 배정했어요.");
       });
     },
@@ -683,6 +694,31 @@
       if (S.confirm !== key) return askConfirm(key);
       run(async () => { await api.admin.unassign(S.pin, t.dataset.id); toast(t.dataset.name + " 배정을 취소했어요."); });
     },
+    "appl-unassign-sel": () => {
+      const ids = applFiltered().filter((x) => S.appl.sel[x.id] && x.assigned_round).map((x) => x.id);
+      if (!ids.length) return;
+      if (S.confirm !== "unsel") return askConfirm("unsel");
+      run(async () => { const n = await api.admin.unassignMany(S.pin, ids); S.appl.sel = {}; toast(n + "명의 배정을 취소했어요. 다시 대기 명단으로 돌아왔어요."); });
+    },
+    "appl-move": () => {
+      const ids = applFiltered().filter((x) => S.appl.sel[x.id] && x.assigned_round).map((x) => x.id);
+      const tg = applTarget(), rid = tg === "__new" ? mkRound(S.appl.newdate || todayISO(), S.appl.newtime) : tg;
+      if (!ids.length) return;
+      if (!rid) return toast("날짜 또는 시간 형식을 확인해 주세요. 시간은 19:00 처럼 적어요.");
+      if (S.confirm !== "mv") return askConfirm("mv");
+      run(async () => {
+        const r = await api.admin.reassign(S.pin, ids, rid, roundLabel(rid));
+        S.appl.sel = {}; S.appl.target = rid; S.round = rid;
+        S.lastAssign = { ids, rid, n: r.assigned }; try { sessionStorage.setItem("rn_admin_lastassign", JSON.stringify(S.lastAssign)); } catch (e) { /* 무시 */ }
+        toast(roundLabel(rid) + "(으)로 " + r.assigned + "명을 옮겼어요.");
+      });
+    },
+    "appl-undo-last": () => {
+      if (!S.lastAssign) return;
+      if (S.confirm !== "undo") return askConfirm("undo");
+      run(async () => { const n = await api.admin.unassignMany(S.pin, S.lastAssign.ids); S.lastAssign = null; try { sessionStorage.removeItem("rn_admin_lastassign"); } catch (e) { /* 무시 */ } toast(n + "명의 배정을 되돌렸어요."); });
+    },
+    "appl-undo-dismiss": () => { S.lastAssign = null; try { sessionStorage.removeItem("rn_admin_lastassign"); } catch (e) { /* 무시 */ } render(); },
     "appl-remove": (t) => {
       const key = "ar" + t.dataset.id;
       if (S.confirm !== key) return askConfirm(key);
@@ -720,6 +756,12 @@
         downloadText("gyeol-sms-" + kind + "-" + (kind === "reserve" ? todayISO().replace(/\D/g, "") : String(S.round).replace(/\D/g, "")) + ".applescript", window.MacSms.buildItems(items, 5));
         toast(list.length + "명 발송 스크립트를 받았어요. 맥북으로 옮겨 실행해 주세요.");
       });
+    },
+    "mac-unmark": () => {
+      const ids = smsSentSel().map((x) => x.id);
+      if (!ids.length) return;
+      if (S.confirm !== "unmark") return askConfirm("unmark");
+      run(async () => { const n = await api.admin.smsUnmark(S.pin, S.round, S.sms.kind, ids); toast(n + "명을 미발송으로 되돌렸어요."); });
     },
     "mac-mark": () => {
       if (S.confirm !== "mark") return askConfirm("mark");

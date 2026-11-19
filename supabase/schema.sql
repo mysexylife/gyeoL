@@ -792,6 +792,32 @@ begin
   update public.applicants set assigned_round = null where id = p_id;
 end $$;
 
+-- 여러 명의 배정을 한꺼번에 되돌린다(방금 배정 되돌리기, 선택한 사람 배정 취소). 되돌린 사람 수를 돌려준다.
+create or replace function public.admin_unassign_many(p_pin text, p_ids uuid[])
+returns int language plpgsql security definer set search_path = public as $$
+declare i uuid; a public.applicants; n int := 0;
+begin
+  perform public._check_admin(p_pin);
+  foreach i in array coalesce(p_ids, '{}'::uuid[]) loop
+    select * into a from public.applicants where id = i;
+    if a.id is null or a.assigned_round is null then continue; end if;
+    delete from public.participants where round_id = a.assigned_round and phone = a.phone;
+    update public.applicants set assigned_round = null where id = i;
+    n := n + 1;
+  end loop;
+  return n;
+end $$;
+
+-- 잘못 배정한 사람을 다른 회차로 옮긴다: 원래 회차의 참가자를 지우고 새 회차에 다시 배정(한 번에 처리되므로 중간에 멈춰도 반쪽 상태가 남지 않는다).
+create or replace function public.admin_reassign(p_pin text, p_ids uuid[], p_round text, p_label text)
+returns jsonb language plpgsql security definer set search_path = public as $$
+begin
+  perform public._check_admin(p_pin);
+  if trim(coalesce(p_round, '')) !~ '^\d{4}-\d{2}-\d{2}( \d{2}:\d{2})?$' then raise exception 'invalid_round'; end if;
+  perform public.admin_unassign_many(p_pin, p_ids);
+  return public.admin_assign(p_pin, p_ids, p_round, p_label);
+end $$;
+
 create or replace function public.admin_applicant_remove(p_pin text, p_id uuid)
 returns void language plpgsql security definer set search_path = public as $$
 begin
@@ -1106,6 +1132,28 @@ begin
     end if;
   else
     raise exception 'invalid_kind';
+  end if;
+  return n;
+end $$;
+
+-- 잘못 표시한 '발송 완료'를 되돌린다(선택한 사람들의 발송 기록을 지움 → 다시 미발송이 됨).
+create or replace function public.admin_sms_unmark(p_pin text, p_round text, p_kind text, p_ids jsonb)
+returns int language plpgsql security definer set search_path = public as $$
+declare n int := 0; m int;
+begin
+  perform public._check_admin(p_pin);
+  if p_kind not in ('reserve', 'join', 'confirm', 'result', 'cancel') then raise exception 'invalid_kind'; end if;
+  if p_ids is null or jsonb_typeof(p_ids) <> 'array' then raise exception 'invalid_ids'; end if;
+  if p_kind = 'reserve' then
+    delete from public.sms_log where kind = 'reserve' and applicant_id::text in (select jsonb_array_elements_text(p_ids));
+    get diagnostics n = row_count;
+  else
+    delete from public.sms_log where kind = p_kind and round_id = p_round and participant_id::text in (select jsonb_array_elements_text(p_ids));
+    get diagnostics n = row_count;
+    if p_kind = 'cancel' then
+      delete from public.sms_log where kind = 'cancel' and round_id = p_round and applicant_id::text in (select jsonb_array_elements_text(p_ids));
+      get diagnostics m = row_count; n := n + m;
+    end if;
   end if;
   return n;
 end $$;
