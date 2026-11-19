@@ -443,7 +443,14 @@
         paidSet: (pin, id, status) => op((s) => { checkAdmin(pin); const q = (s.paid || []).find((x) => x.id === id); if (q) q.status = status; }),
         rounds: (pin) => op((s) => {
           checkAdmin(pin);
-          return Object.keys(s.rounds).sort().map((id) => ({ id, label: s.rounds[id].label, results_open: !!s.rounds[id].results_open, threads_open: !!s.rounds[id].threads_open, count: s.people.filter((p) => p.round === id).length, male: s.people.filter((p) => p.round === id && p.gender === "M").length, female: s.people.filter((p) => p.round === id && p.gender === "F").length }));
+          return Object.keys(s.rounds).sort().map((id) => {
+            const here = s.people.filter((p) => p.round === id), has = (a, b) => (s.picks[a] || []).some((x) => x.target === b);
+            const mm = new Set(), ff = new Set();
+            here.filter((p) => p.gender === "M").forEach((m) => (s.picks[m.id] || []).forEach((x) => { if (x.target && has(x.target, m.id)) { mm.add(m.id); ff.add(x.target); } }));
+            let pairs = 0; here.filter((p) => p.gender === "M").forEach((m) => (s.picks[m.id] || []).forEach((x) => { if (x.target && has(x.target, m.id)) pairs++; }));
+            return { id, label: s.rounds[id].label, results_open: !!s.rounds[id].results_open, threads_open: !!s.rounds[id].threads_open, count: here.length, male: here.filter((p) => p.gender === "M").length, female: here.filter((p) => p.gender === "F").length,
+              picked: here.filter((p) => (s.picks[p.id] || []).length).length, pairs, matched_m: mm.size, matched_f: ff.size };
+          });
         }),
         dashboard: (pin, round) => op((s) => {
           checkAdmin(pin);

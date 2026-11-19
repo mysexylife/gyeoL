@@ -663,3 +663,12 @@ button.brand { background: none; border: 0; padding: 4px 0; cursor: pointer; -we
 .tplbox { display: grid; gap: 6px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: rgba(0,0,0,.025); }
 .tplhead { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; justify-content: space-between; }
 .tplbox textarea { width: 100%; box-sizing: border-box; }
+/* 회차별 매칭 현황 표 */
+.tblwrap { overflow-x: auto; }
+.stbl { width: 100%; border-collapse: collapse; font-size: 13.5px; font-variant-numeric: tabular-nums; }
+.stbl th, .stbl td { padding: 8px 6px; text-align: right; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.stbl thead th { font-weight: 600; color: var(--muted); font-size: 12.5px; }
+.stbl th[scope="row"], .stbl thead th:first-child, .stbl tfoot th { text-align: left; }
+.stbl tr.cur { background: rgba(176, 108, 54, .10); }
+.stbl tfoot th, .stbl tfoot td { border-bottom: 0; font-weight: 600; }
+.stbl small { color: var(--muted); font-weight: 400; }

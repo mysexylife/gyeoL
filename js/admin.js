@@ -453,9 +453,22 @@
   }
 
   // [최종 선택 현황] 결과 공개 스위치 + 선택 현황·조정 + 매칭 쌍
+  // 회차별 매칭 현황: 참가 인원 · 선택 제출 · 서로 선택한 쌍 · 매칭 성공 인원(참가자 대비 %)
+  function roundStatsPanel() {
+    const rows = (S.rounds || []).filter((r) => r.count > 0).slice().sort((a, b) => (a.id < b.id ? -1 : 1));
+    if (!rows.length) return "";
+    const pct = (a, b) => (b ? Math.round((a / b) * 100) + "%" : "-");
+    const tot = rows.reduce((t, r) => ({ n: t.n + r.count, picked: t.picked + (r.picked || 0), pairs: t.pairs + (r.pairs || 0), ok: t.ok + (r.matched_m || 0) + (r.matched_f || 0) }), { n: 0, picked: 0, pairs: 0, ok: 0 });
+    const tr = (r) => { const ok = (r.matched_m || 0) + (r.matched_f || 0); return `<tr class="${r.id === S.round ? "cur" : ""}"><th scope="row">${esc(roundLabel(r.id))}</th><td>${r.count}<small> 남${r.male} 여${r.female}</small></td><td>${r.picked || 0}</td><td>${r.pairs || 0}</td><td><b>${ok}명</b> <small>남${r.matched_m || 0} 여${r.matched_f || 0} · ${pct(ok, r.count)}</small></td></tr>`; };
+    return `<section class="panel"><h2>회차별 매칭 현황 <span class="sub">서로 선택한 사람 수</span></h2>
+      <div class="tblwrap"><table class="stbl"><thead><tr><th>회차</th><th>참가</th><th>선택 제출</th><th>매칭 쌍</th><th>매칭 성공</th></tr></thead><tbody>${rows.map(tr).join("")}</tbody>
+        ${rows.length > 1 ? `<tfoot><tr><th>전체</th><td>${tot.n}</td><td>${tot.picked}</td><td>${tot.pairs}</td><td><b>${tot.ok}명</b> <small>${pct(tot.ok, tot.n)}</small></td></tr></tfoot>` : ""}</table></div>
+      <p class="note">매칭 성공 = 서로 선택한 상대가 한 명 이상 있는 참가자예요. 한 사람이 여러 명과 서로 선택해도 1명으로 세고, 매칭 쌍은 서로 선택한 짝의 수예요.</p></section>`;
+  }
+
   function tabPicks(d, rnd) {
     const ppl = d.participants, submitted = ppl.filter((p) => p.submitted).length, bad = (d.picks || []).filter((x) => !x.target_id).length;
-    return `${threadPanel(rnd)}<section class="panel"><div class="toolbar"><h2>${esc(roundLabel(rnd.id))} 매칭 결과</h2><button class="btn sm ghost" data-act="refresh">새로고침</button></div>
+    return `${roundStatsPanel()}${threadPanel(rnd)}<section class="panel"><div class="toolbar"><h2>${esc(roundLabel(rnd.id))} 매칭 결과</h2><button class="btn sm ghost" data-act="refresh">새로고침</button></div>
         <p class="note">공개하면 참가자 화면에 <b>매칭 결과와 연락처</b>가 열리고, 이후엔 선택을 바꿀 수 없어요. 공개 전에 <b>확인 필요 0건</b>인지 확인하세요.</p>
         <div class="resultbar"><span class="tag ${d.results_open ? "y" : "n"}">${d.results_open ? "결과 공개 중" : "아직 비공개"}</span><span class="sub" style="font-size:13px">제출 ${submitted} / ${ppl.length}명 · 매칭 ${d.matches.length}쌍${bad ? ` · <b class="badtxt">확인 필요 ${bad}건</b>` : ""}</span>
           <button class="btn ${d.results_open ? "ghost" : ""}" style="width:auto" data-act="results" ${S.busy ? "disabled" : ""}>${d.results_open ? (S.confirm === "res-off" ? "한 번 더 눌러 공개 취소" : "공개 취소 (다시 제출 받기)") : S.confirm === "res-on" ? "한 번 더 눌러 공개" : "매칭 결과 공개하기"}</button></div></section>

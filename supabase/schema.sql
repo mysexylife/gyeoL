@@ -509,7 +509,15 @@ begin
       'id', r.id, 'label', r.label, 'results_open', r.results_open, 'threads_open', r.threads_open,
       'count', (select count(*) from public.participants p where p.round_id = r.id),
       'male',  (select count(*) from public.participants p where p.round_id = r.id and p.gender = 'M'),
-      'female',(select count(*) from public.participants p where p.round_id = r.id and p.gender = 'F')) order by r.id)
+      'female',(select count(*) from public.participants p where p.round_id = r.id and p.gender = 'F'),
+      -- 최종 선택 현황: 선택을 낸 사람 수 / 서로 선택한 쌍 수 / 매칭된 남·여 인원
+      'picked', (select count(distinct pk.participant_id) from public.picks pk join public.participants p on p.id = pk.participant_id where p.round_id = r.id),
+      'pairs', (select count(*) from public.picks x join public.picks y on y.participant_id = x.target_id and y.target_id = x.participant_id
+                  join public.participants m on m.id = x.participant_id and m.gender = 'M' and m.round_id = r.id),
+      'matched_m', (select count(distinct x.participant_id) from public.picks x join public.picks y on y.participant_id = x.target_id and y.target_id = x.participant_id
+                  join public.participants m on m.id = x.participant_id and m.gender = 'M' and m.round_id = r.id),
+      'matched_f', (select count(distinct x.target_id) from public.picks x join public.picks y on y.participant_id = x.target_id and y.target_id = x.participant_id
+                  join public.participants m on m.id = x.participant_id and m.gender = 'M' and m.round_id = r.id)) order by r.id)
     from public.rounds r), '[]'::jsonb);
 end $$;
 
